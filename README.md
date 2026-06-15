@@ -1,10 +1,10 @@
 # Discord Stock Bot
 
-A small self-hosted Discord slash-command bot for stock charts, company info, and recent news.
+A small self-hosted Discord slash-command bot for Heikin-Ashi stock charts, company info, and recent news.
 
 ## Commands
 
-Each command takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
+Each chart command returns a Heikin-Ashi candle chart and takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
 
 | Command | Range |
 | --- | --- |

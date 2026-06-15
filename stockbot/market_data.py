@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import pandas as pd
 import requests
 import yfinance as yf
@@ -75,14 +76,18 @@ def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
         raise ValueError(description)
 
     timestamps = result.get("timestamp") or []
-    closes = result.get("indicators", {}).get("quote", [{}])[0].get("close") or []
+    quote = result.get("indicators", {}).get("quote", [{}])[0]
+    opens = quote.get("open") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+    closes = quote.get("close") or []
     rows = [
-        (datetime.fromtimestamp(ts, tz=timezone.utc), close)
-        for ts, close in zip(timestamps, closes)
-        if close is not None
+        (datetime.fromtimestamp(ts, tz=timezone.utc), open_, high, low, close)
+        for ts, open_, high, low, close in zip(timestamps, opens, highs, lows, closes)
+        if None not in (open_, high, low, close)
     ]
 
-    history = pd.DataFrame(rows, columns=["Date", "Close"]).set_index("Date")
+    history = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close"]).set_index("Date")
 
     if history.empty:
         raise ValueError(f"No market data found for `{symbol}`.")
@@ -153,6 +158,73 @@ def _change_text(history: pd.DataFrame) -> tuple[float, float, str]:
     return change, percent, arrow
 
 
+def _heikin_ashi(history: pd.DataFrame) -> pd.DataFrame:
+    ha = pd.DataFrame(index=history.index)
+    ha["Close"] = (history["Open"] + history["High"] + history["Low"] + history["Close"]) / 4
+
+    opens = []
+    for index, row in enumerate(history.itertuples()):
+        if index == 0:
+            opens.append((row.Open + row.Close) / 2)
+        else:
+            opens.append((opens[index - 1] + ha["Close"].iloc[index - 1]) / 2)
+
+    ha["Open"] = opens
+    ha["High"] = pd.concat([history["High"], ha["Open"], ha["Close"]], axis=1).max(axis=1)
+    ha["Low"] = pd.concat([history["Low"], ha["Open"], ha["Close"]], axis=1).min(axis=1)
+    return ha[["Open", "High", "Low", "Close"]]
+
+
+def _candle_width(date_numbers: list[float]) -> float:
+    if len(date_numbers) < 2:
+        return 0.6
+
+    gaps = [
+        later - earlier
+        for earlier, later in zip(date_numbers, date_numbers[1:])
+        if later > earlier
+    ]
+
+    if not gaps:
+        return 0.6
+
+    return min(pd.Series(gaps).median() * 0.72, 16)
+
+
+def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
+    ha = _heikin_ashi(history)
+    date_numbers = mdates.date2num(ha.index.to_pydatetime()).tolist()
+    width = _candle_width(date_numbers)
+    up_color = "#138a36"
+    down_color = "#c62828"
+
+    for x_value, candle in zip(date_numbers, ha.itertuples()):
+        open_ = float(candle.Open)
+        high = float(candle.High)
+        low = float(candle.Low)
+        close = float(candle.Close)
+        color = up_color if close >= open_ else down_color
+        body_low = min(open_, close)
+        body_height = abs(close - open_)
+
+        ax.vlines(x_value, low, high, color=color, linewidth=1.1, alpha=0.95)
+
+        if body_height == 0:
+            ax.hlines(open_, x_value - width / 2, x_value + width / 2, color=color, linewidth=1.6)
+        else:
+            ax.add_patch(
+                Rectangle(
+                    (x_value - width / 2, body_low),
+                    width,
+                    body_height,
+                    facecolor=color,
+                    edgecolor=color,
+                    linewidth=0.8,
+                    alpha=0.88,
+                )
+            )
+
+
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
     history = get_history(symbol, chart_range)
     symbol = clean_symbol(symbol)
@@ -160,18 +232,9 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     last_price = float(history["Close"].iloc[-1])
 
     fig, ax = plt.subplots(figsize=(10, 5.4), dpi=150)
-    line_color = "#138a36" if change >= 0 else "#c62828"
+    _draw_heikin_ashi_candles(ax, history)
 
-    ax.plot(history.index, history["Close"], color=line_color, linewidth=2)
-    ax.fill_between(
-        mdates.date2num(history.index.to_pydatetime()),
-        history["Close"].to_numpy(dtype=float),
-        float(history["Close"].min()),
-        color=line_color,
-        alpha=0.08,
-    )
-
-    ax.set_title(f"{symbol} - {chart_range.label}", fontsize=15, fontweight="bold")
+    ax.set_title(f"{symbol} - {chart_range.label} Heikin-Ashi", fontsize=15, fontweight="bold")
     ax.set_ylabel("Price")
     ax.grid(True, alpha=0.25)
     ax.margins(x=0.01)
