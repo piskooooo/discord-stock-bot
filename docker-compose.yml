@@ -1,0 +1,9 @@
+services:
+  discord-stock-bot:
+    build: .
+    container_name: discord-stock-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./stockbot:/app/stockbot:ro

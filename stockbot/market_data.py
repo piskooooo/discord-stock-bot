@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from io import BytesIO
+from typing import Any
+from xml.etree import ElementTree
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
+import requests
+import yfinance as yf
+
+
+@dataclass(frozen=True)
+class ChartRange:
+    label: str
+    period: str
+    interval: str
+
+
+RANGES: dict[str, ChartRange] = {
+    "mi": ChartRange("1 minute", "1d", "1m"),
+    "da": ChartRange("1 day", "1d", "5m"),
+    "we": ChartRange("1 week", "5d", "30m"),
+    "mo": ChartRange("1 month", "1mo", "1d"),
+    "ytd": ChartRange("YTD", "ytd", "1d"),
+    "y1": ChartRange("1 year", "1y", "1d"),
+    "y5": ChartRange("5 years", "5y", "1wk"),
+    "all": ChartRange("all time", "max", "1mo"),
+}
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0 Safari/537.36"
+    )
+}
+
+
+def clean_symbol(symbol: str) -> str:
+    return symbol.strip().upper().replace("$", "")
+
+
+def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
+    symbol = clean_symbol(symbol)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    response = requests.get(
+        url,
+        params={
+            "range": chart_range.period,
+            "interval": chart_range.interval,
+            "includePrePost": "true",
+        },
+        headers=HEADERS,
+        timeout=15,
+    )
+
+    if response.status_code == 429:
+        raise ValueError("Yahoo Finance is rate limiting requests. Wait a bit and try again.")
+
+    response.raise_for_status()
+    payload = response.json()
+    result = (payload.get("chart", {}).get("result") or [None])[0]
+
+    if not result:
+        error = payload.get("chart", {}).get("error") or {}
+        description = error.get("description") or f"No market data found for `{symbol}`."
+        raise ValueError(description)
+
+    timestamps = result.get("timestamp") or []
+    closes = result.get("indicators", {}).get("quote", [{}])[0].get("close") or []
+    rows = [
+        (datetime.fromtimestamp(ts, tz=timezone.utc), close)
+        for ts, close in zip(timestamps, closes)
+        if close is not None
+    ]
+
+    history = pd.DataFrame(rows, columns=["Date", "Close"]).set_index("Date")
+
+    if history.empty:
+        raise ValueError(f"No market data found for `{symbol}`.")
+
+    return history
+
+
+def _get_quote(symbol: str) -> dict[str, Any]:
+    symbol = clean_symbol(symbol)
+    response = requests.get(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+        params={"range": "1d", "interval": "5m", "includePrePost": "true"},
+        headers=HEADERS,
+        timeout=15,
+    )
+
+    if response.status_code == 429:
+        raise ValueError("Yahoo Finance is rate limiting requests. Wait a bit and try again.")
+
+    response.raise_for_status()
+    result = (response.json().get("chart", {}).get("result") or [None])[0]
+
+    if not result:
+        return {}
+
+    meta = result.get("meta") or {}
+    quote = result.get("indicators", {}).get("quote", [{}])[0]
+    opens = [value for value in quote.get("open", []) if value is not None]
+    lows = [value for value in quote.get("low", []) if value is not None]
+    highs = [value for value in quote.get("high", []) if value is not None]
+
+    return {
+        "currency": meta.get("currency"),
+        "exchange": meta.get("exchangeName"),
+        "fullExchangeName": meta.get("fullExchangeName") or meta.get("exchangeName"),
+        "regularMarketPrice": meta.get("regularMarketPrice"),
+        "regularMarketPreviousClose": meta.get("chartPreviousClose") or meta.get("previousClose"),
+        "regularMarketOpen": opens[0] if opens else None,
+        "regularMarketDayLow": min(lows) if lows else None,
+        "regularMarketDayHigh": max(highs) if highs else None,
+        "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
+        "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"),
+    }
+
+
+def _get_search_profile(symbol: str) -> dict[str, Any]:
+    response = requests.get(
+        "https://query1.finance.yahoo.com/v1/finance/search",
+        params={"q": clean_symbol(symbol), "quotesCount": 1, "newsCount": 0},
+        headers=HEADERS,
+        timeout=15,
+    )
+
+    if response.status_code == 429:
+        return {}
+
+    response.raise_for_status()
+    quotes = response.json().get("quotes") or []
+    return quotes[0] if quotes else {}
+
+
+def _change_text(history: pd.DataFrame) -> tuple[float, float, str]:
+    first = float(history["Close"].iloc[0])
+    last = float(history["Close"].iloc[-1])
+    change = last - first
+    percent = (change / first) * 100 if first else 0
+    arrow = "up" if change >= 0 else "down"
+    return change, percent, arrow
+
+
+def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
+    history = get_history(symbol, chart_range)
+    symbol = clean_symbol(symbol)
+    change, percent, arrow = _change_text(history)
+    last_price = float(history["Close"].iloc[-1])
+
+    fig, ax = plt.subplots(figsize=(10, 5.4), dpi=150)
+    line_color = "#138a36" if change >= 0 else "#c62828"
+
+    ax.plot(history.index, history["Close"], color=line_color, linewidth=2)
+    ax.fill_between(
+        mdates.date2num(history.index.to_pydatetime()),
+        history["Close"].to_numpy(dtype=float),
+        float(history["Close"].min()),
+        color=line_color,
+        alpha=0.08,
+    )
+
+    ax.set_title(f"{symbol} - {chart_range.label}", fontsize=15, fontweight="bold")
+    ax.set_ylabel("Price")
+    ax.grid(True, alpha=0.25)
+    ax.margins(x=0.01)
+
+    if chart_range.interval in {"1m", "5m", "30m"}:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+    else:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    image = BytesIO()
+    fig.savefig(image, format="png", bbox_inches="tight")
+    plt.close(fig)
+    image.seek(0)
+
+    description = (
+        f"Last: `${last_price:,.2f}` | Change: `{change:+.2f}` "
+        f"(`{percent:+.2f}%`) | Trend: `{arrow}`"
+    )
+    filename = f"{symbol.lower()}-{chart_range.period}-{chart_range.interval}.png"
+    return image, filename, description
+
+
+def get_info(symbol: str) -> dict[str, Any]:
+    symbol = clean_symbol(symbol)
+    try:
+        quote = _get_quote(symbol)
+    except Exception:
+        quote = {}
+
+    try:
+        search_profile = _get_search_profile(symbol)
+    except Exception:
+        search_profile = {}
+
+    ticker = yf.Ticker(symbol)
+    try:
+        info = ticker.get_info()
+    except Exception:
+        info = {}
+
+    return {
+        "symbol": symbol,
+        "name": (
+            info.get("longName")
+            or search_profile.get("longname")
+            or search_profile.get("shortname")
+            or symbol
+        ),
+        "exchange": (
+            info.get("exchange")
+            or quote.get("fullExchangeName")
+            or search_profile.get("exchDisp")
+            or quote.get("exchange")
+        ),
+        "currency": info.get("currency") or quote.get("currency"),
+        "quote_type": search_profile.get("typeDisp") or info.get("quoteType"),
+        "sector": info.get("sector") or search_profile.get("sector"),
+        "industry": info.get("industry") or search_profile.get("industry"),
+        "market_cap": info.get("marketCap") or quote.get("marketCap"),
+        "current_price": info.get("currentPrice") or quote.get("regularMarketPrice"),
+        "previous_close": info.get("previousClose") or quote.get("regularMarketPreviousClose"),
+        "open": info.get("open") or quote.get("regularMarketOpen"),
+        "day_low": info.get("dayLow") or quote.get("regularMarketDayLow"),
+        "day_high": info.get("dayHigh") or quote.get("regularMarketDayHigh"),
+        "fifty_two_week_low": info.get("fiftyTwoWeekLow") or quote.get("fiftyTwoWeekLow"),
+        "fifty_two_week_high": info.get("fiftyTwoWeekHigh") or quote.get("fiftyTwoWeekHigh"),
+        "website": info.get("website"),
+        "summary": info.get("longBusinessSummary"),
+        "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def get_news(symbol: str, limit: int = 5) -> list[dict[str, str]]:
+    symbol = clean_symbol(symbol)
+    response = requests.get(
+        "https://feeds.finance.yahoo.com/rss/2.0/headline",
+        params={"s": symbol, "region": "US", "lang": "en-US"},
+        headers=HEADERS,
+        timeout=15,
+    )
+
+    if response.status_code == 429:
+        raise ValueError("Yahoo Finance is rate limiting requests. Wait a bit and try again.")
+
+    response.raise_for_status()
+    root = ElementTree.fromstring(response.content)
+    items: list[dict[str, str]] = []
+
+    for item in root.findall("./channel/item")[:limit]:
+        title = item.findtext("title") or "Untitled"
+        link = item.findtext("link") or ""
+        publisher = item.findtext("source") or "Yahoo Finance"
+        published_text = item.findtext("pubDate") or ""
+
+        items.append(
+            {
+                "title": title,
+                "link": link,
+                "publisher": publisher,
+                "published": published_text,
+            }
+        )
+
+    return items
+
+
+def format_money(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if abs(value) >= 1_000_000_000_000:
+        return f"${value / 1_000_000_000_000:.2f}T"
+    if abs(value) >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.2f}B"
+    if abs(value) >= 1_000_000:
+        return f"${value / 1_000_000:.2f}M"
+    return f"${value:,.2f}"
