@@ -324,6 +324,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     volume_ax.margins(x=0.01)
 
     for chart_ax in (ax, volume_ax):
+        chart_ax.yaxis.tick_right()
+        chart_ax.yaxis.set_label_position("right")
         chart_ax.yaxis.label.set_color(CHART_COLORS["muted"])
         chart_ax.tick_params(axis="both", colors=CHART_COLORS["muted"])
         chart_ax.grid(True, color=CHART_COLORS["grid"], alpha=0.55, linewidth=0.8)
