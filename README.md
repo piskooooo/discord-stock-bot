@@ -8,7 +8,7 @@ Each chart command returns a Heikin-Ashi candle chart and takes a ticker symbol,
 
 | Command | Range |
 | --- | --- |
-| `/mi` | 1-minute candles for the current trading day |
+| `/mi` | 5-minute candles for the current trading day |
 | `/da` | 1-day chart |
 | `/we` | 1-week chart |
 | `/mo` | 1-month chart |

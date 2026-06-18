@@ -63,7 +63,7 @@ async def send_chart(interaction: discord.Interaction, symbol: str, range_key: s
     await interaction.followup.send(embed=embed, file=file)
 
 
-@bot.tree.command(name="mi", description="Show a 1-minute stock chart.")
+@bot.tree.command(name="mi", description="Show a 5-minute stock chart.")
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def minute(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "mi")

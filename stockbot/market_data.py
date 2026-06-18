@@ -26,7 +26,7 @@ class ChartRange:
 
 
 RANGES: dict[str, ChartRange] = {
-    "mi": ChartRange("1 minute", "1d", "1m"),
+    "mi": ChartRange("5 minute", "1d", "5m"),
     "da": ChartRange("1 day", "1d", "5m"),
     "we": ChartRange("1 week", "5d", "30m"),
     "mo": ChartRange("1 month", "1mo", "1d"),
@@ -34,6 +34,16 @@ RANGES: dict[str, ChartRange] = {
     "y1": ChartRange("1 year", "1y", "1d"),
     "y5": ChartRange("5 years", "5y", "1wk"),
     "all": ChartRange("all time", "max", "1mo"),
+}
+
+CHART_COLORS = {
+    "background": "#0d1117",
+    "axes": "#111827",
+    "grid": "#30363d",
+    "text": "#e6edf3",
+    "muted": "#9ca3af",
+    "up": "#22c55e",
+    "down": "#ef4444",
 }
 
 HEADERS = {
@@ -195,8 +205,8 @@ def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
     ha = _heikin_ashi(history)
     date_numbers = mdates.date2num(ha.index.to_pydatetime()).tolist()
     width = _candle_width(date_numbers)
-    up_color = "#138a36"
-    down_color = "#c62828"
+    up_color = CHART_COLORS["up"]
+    down_color = CHART_COLORS["down"]
 
     for x_value, candle in zip(date_numbers, ha.itertuples()):
         open_ = float(candle.Open)
@@ -232,12 +242,24 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     last_price = float(history["Close"].iloc[-1])
 
     fig, ax = plt.subplots(figsize=(10, 5.4), dpi=150)
+    fig.patch.set_facecolor(CHART_COLORS["background"])
+    ax.set_facecolor(CHART_COLORS["axes"])
     _draw_heikin_ashi_candles(ax, history)
 
-    ax.set_title(f"{symbol} - {chart_range.label} Heikin-Ashi", fontsize=15, fontweight="bold")
+    ax.set_title(
+        f"{symbol} - {chart_range.label} Heikin-Ashi",
+        color=CHART_COLORS["text"],
+        fontsize=15,
+        fontweight="bold",
+    )
     ax.set_ylabel("Price")
-    ax.grid(True, alpha=0.25)
+    ax.yaxis.label.set_color(CHART_COLORS["muted"])
+    ax.tick_params(axis="both", colors=CHART_COLORS["muted"])
+    ax.grid(True, color=CHART_COLORS["grid"], alpha=0.55, linewidth=0.8)
     ax.margins(x=0.01)
+
+    for spine in ax.spines.values():
+        spine.set_color(CHART_COLORS["grid"])
 
     if chart_range.interval in {"1m", "5m", "30m"}:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
@@ -248,7 +270,13 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     fig.tight_layout()
 
     image = BytesIO()
-    fig.savefig(image, format="png", bbox_inches="tight")
+    fig.savefig(
+        image,
+        format="png",
+        bbox_inches="tight",
+        facecolor=fig.get_facecolor(),
+        edgecolor="none",
+    )
     plt.close(fig)
     image.seek(0)
 
