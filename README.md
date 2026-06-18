@@ -4,7 +4,7 @@ A small self-hosted Discord slash-command bot for Heikin-Ashi stock charts, comp
 
 ## Commands
 
-Each chart command returns a Heikin-Ashi candle chart and takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
+Each chart command returns a Heikin-Ashi candle chart with volume and takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
 
 | Command | Range |
 | --- | --- |

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from io import BytesIO
 from typing import Any
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
 import matplotlib
 
@@ -13,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib.ticker import FuncFormatter
 import pandas as pd
 import requests
 import yfinance as yf
@@ -23,10 +25,11 @@ class ChartRange:
     label: str
     period: str
     interval: str
+    show_full_trading_day: bool = False
 
 
 RANGES: dict[str, ChartRange] = {
-    "mi": ChartRange("5 minute", "1d", "5m"),
+    "mi": ChartRange("5 minute", "1d", "5m", True),
     "da": ChartRange("1 day", "1d", "5m"),
     "we": ChartRange("1 week", "5d", "30m"),
     "mo": ChartRange("1 month", "1mo", "1d"),
@@ -35,6 +38,10 @@ RANGES: dict[str, ChartRange] = {
     "y5": ChartRange("5 years", "5y", "1wk"),
     "all": ChartRange("all time", "max", "1mo"),
 }
+
+MARKET_TZ = ZoneInfo("America/New_York")
+REGULAR_MARKET_OPEN = time(9, 30)
+REGULAR_MARKET_CLOSE = time(16, 0)
 
 CHART_COLORS = {
     "background": "#0d1117",
@@ -91,13 +98,21 @@ def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
     highs = quote.get("high") or []
     lows = quote.get("low") or []
     closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+
+    if len(volumes) < len(timestamps):
+        volumes = volumes + [0] * (len(timestamps) - len(volumes))
+
     rows = [
-        (datetime.fromtimestamp(ts, tz=timezone.utc), open_, high, low, close)
-        for ts, open_, high, low, close in zip(timestamps, opens, highs, lows, closes)
+        (datetime.fromtimestamp(ts, tz=timezone.utc), open_, high, low, close, volume or 0)
+        for ts, open_, high, low, close, volume in zip(timestamps, opens, highs, lows, closes, volumes)
         if None not in (open_, high, low, close)
     ]
 
-    history = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close"]).set_index("Date")
+    history = pd.DataFrame(
+        rows,
+        columns=["Date", "Open", "High", "Low", "Close", "Volume"],
+    ).set_index("Date")
 
     if history.empty:
         raise ValueError(f"No market data found for `{symbol}`.")
@@ -235,16 +250,67 @@ def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
             )
 
 
+def _format_volume(value: float, _position: int) -> str:
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.1f}B"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}K"
+    return f"{value:.0f}"
+
+
+def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
+    if "Volume" not in history or history["Volume"].sum() <= 0:
+        ax.set_visible(False)
+        return
+
+    date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
+    width = _candle_width(date_numbers)
+    colors = [
+        CHART_COLORS["up"] if close >= open_ else CHART_COLORS["down"]
+        for open_, close in zip(history["Open"], history["Close"])
+    ]
+
+    ax.bar(
+        date_numbers,
+        history["Volume"],
+        width=width,
+        color=colors,
+        alpha=0.45,
+        align="center",
+    )
+    ax.set_ylabel("Volume")
+    ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
+
+
+def _set_regular_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
+    market_date = history.index[-1].astimezone(MARKET_TZ).date()
+    market_open = datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)
+    market_close = datetime.combine(market_date, REGULAR_MARKET_CLOSE, MARKET_TZ)
+    ax.set_xlim(mdates.date2num(market_open), mdates.date2num(market_close))
+
+
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
     history = get_history(symbol, chart_range)
     symbol = clean_symbol(symbol)
     change, percent, arrow = _change_text(history)
     last_price = float(history["Close"].iloc[-1])
 
-    fig, ax = plt.subplots(figsize=(10, 5.4), dpi=150)
+    fig, (ax, volume_ax) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 6.2),
+        dpi=150,
+        sharex=True,
+        gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04},
+    )
     fig.patch.set_facecolor(CHART_COLORS["background"])
-    ax.set_facecolor(CHART_COLORS["axes"])
+    for chart_ax in (ax, volume_ax):
+        chart_ax.set_facecolor(CHART_COLORS["axes"])
+
     _draw_heikin_ashi_candles(ax, history)
+    _draw_volume(volume_ax, history)
 
     ax.set_title(
         f"{symbol} - {chart_range.label} Heikin-Ashi",
@@ -253,18 +319,25 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         fontweight="bold",
     )
     ax.set_ylabel("Price")
-    ax.yaxis.label.set_color(CHART_COLORS["muted"])
-    ax.tick_params(axis="both", colors=CHART_COLORS["muted"])
-    ax.grid(True, color=CHART_COLORS["grid"], alpha=0.55, linewidth=0.8)
+    volume_ax.set_xlabel("")
     ax.margins(x=0.01)
+    volume_ax.margins(x=0.01)
 
-    for spine in ax.spines.values():
-        spine.set_color(CHART_COLORS["grid"])
+    for chart_ax in (ax, volume_ax):
+        chart_ax.yaxis.label.set_color(CHART_COLORS["muted"])
+        chart_ax.tick_params(axis="both", colors=CHART_COLORS["muted"])
+        chart_ax.grid(True, color=CHART_COLORS["grid"], alpha=0.55, linewidth=0.8)
+
+        for spine in chart_ax.spines.values():
+            spine.set_color(CHART_COLORS["grid"])
 
     if chart_range.interval in {"1m", "5m", "30m"}:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M"))
+        volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M", tz=MARKET_TZ))
     else:
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+
+    if chart_range.show_full_trading_day:
+        _set_regular_session_xlim(ax, history)
 
     fig.autofmt_xdate()
     fig.tight_layout()
