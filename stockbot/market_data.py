@@ -14,7 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter
 import pandas as pd
 import requests
 import yfinance as yf
@@ -284,6 +284,34 @@ def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
 
 
+def _regular_session_history(history: pd.DataFrame) -> pd.DataFrame:
+    local_times = [index.astimezone(MARKET_TZ).time() for index in history.index]
+    mask = [
+        REGULAR_MARKET_OPEN <= local_time <= REGULAR_MARKET_CLOSE
+        for local_time in local_times
+    ]
+    session_history = history.loc[mask]
+    return session_history if not session_history.empty else history
+
+
+def _set_price_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
+    low = float(history["Low"].min())
+    high = float(history["High"].max())
+    price_range = high - low
+
+    if price_range <= 0:
+        padding = max(high * 0.001, 0.01)
+    else:
+        padding = price_range * 0.08
+
+    ax.set_ylim(low - padding, high + padding)
+
+
+def _set_volume_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
+    if "Volume" in history and history["Volume"].sum() > 0:
+        ax.set_ylim(0, float(history["Volume"].max()) * 1.18)
+
+
 def _set_regular_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
     market_date = history.index[-1].astimezone(MARKET_TZ).date()
     market_open = datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)
@@ -291,11 +319,30 @@ def _set_regular_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
     ax.set_xlim(mdates.date2num(market_open), mdates.date2num(market_close))
 
 
+def _set_regular_session_ticks(ax: plt.Axes, history: pd.DataFrame) -> None:
+    market_date = history.index[-1].astimezone(MARKET_TZ).date()
+    ticks = [datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)]
+    ticks.extend(
+        datetime.combine(market_date, time(hour, 0), MARKET_TZ)
+        for hour in range(10, 17)
+    )
+    ax.xaxis.set_major_locator(FixedLocator(mdates.date2num(ticks)))
+    ax.xaxis.set_major_formatter(FuncFormatter(_format_intraday_tick))
+
+
+def _format_intraday_tick(value: float, _position: int) -> str:
+    tick_time = mdates.num2date(value, tz=MARKET_TZ)
+    if tick_time.minute:
+        return tick_time.strftime("%-I:%M")
+    return tick_time.strftime("%-I")
+
+
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
     history = get_history(symbol, chart_range)
+    display_history = _regular_session_history(history) if chart_range.show_full_trading_day else history
     symbol = clean_symbol(symbol)
-    change, percent, arrow = _change_text(history)
-    last_price = float(history["Close"].iloc[-1])
+    change, percent, arrow = _change_text(display_history)
+    last_price = float(display_history["Close"].iloc[-1])
 
     fig, (ax, volume_ax) = plt.subplots(
         2,
@@ -309,8 +356,10 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     for chart_ax in (ax, volume_ax):
         chart_ax.set_facecolor(CHART_COLORS["axes"])
 
-    _draw_heikin_ashi_candles(ax, history)
-    _draw_volume(volume_ax, history)
+    _draw_heikin_ashi_candles(ax, display_history)
+    _draw_volume(volume_ax, display_history)
+    _set_price_ylim(ax, display_history)
+    _set_volume_ylim(volume_ax, display_history)
 
     ax.set_title(
         f"{symbol} - {chart_range.label} Heikin-Ashi",
@@ -339,7 +388,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
 
     if chart_range.show_full_trading_day:
-        _set_regular_session_xlim(ax, history)
+        _set_regular_session_xlim(ax, display_history)
+        _set_regular_session_ticks(volume_ax, display_history)
 
     fig.autofmt_xdate()
     fig.tight_layout()
