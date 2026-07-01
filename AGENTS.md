@@ -4,6 +4,12 @@
 
 This is a small Discord stock bot for a private friend-group server. It provides slash commands for stock charts, recent news, and basic ticker info. The current deployment path is a public GitHub repo that builds a public GHCR Docker image for Unraid Docker.
 
+## Canonical Project Root
+
+- Work from `/Users/pisko/Documents/discord-stock-bot`.
+- If a Codex thread opens inside an older `/Users/pisko/Documents/Codex/...` wrapper folder, switch to this repo before reading or editing files.
+- At the start of new project threads, confirm `pwd` is this folder and run `git status --short --branch`.
+
 ## Current Deployment
 
 - Public repo: `piskooooo/discord-stock-bot`
