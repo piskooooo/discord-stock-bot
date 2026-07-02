@@ -2,6 +2,8 @@
 
 A small self-hosted Discord slash-command bot for Heikin-Ashi stock charts, company info, and recent news.
 
+This bot is intended for private friend-group servers. It is for fun and convenience, not financial advice.
+
 ## Commands
 
 Each chart command returns a Heikin-Ashi candle chart with volume and takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
@@ -93,6 +95,12 @@ python -m stockbot.bot
 
 ## Data source
 
-This bot uses Yahoo Finance data through `yfinance`. It is convenient for personal/friend-group bots, but it is not a paid market data feed and should not be treated as guaranteed real-time financial data.
+This bot uses Yahoo Finance chart, quote, profile, and RSS news sources. Some quote/profile enrichment uses `yfinance` as a best-effort fallback. These sources are convenient for personal/friend-group bots, but they are not a paid market data feed and should not be treated as guaranteed real-time financial data.
 
 This bot is for fun and convenience, not financial advice.
+
+## Policy notes
+
+- See [PRIVACY.md](PRIVACY.md) for the bot's basic privacy policy.
+- See [TERMS.md](TERMS.md) for usage terms and disclaimers.
+- See [docs/compliance.md](docs/compliance.md) for the deployment compliance checklist.

@@ -17,6 +17,10 @@ logging.basicConfig(
 
 logger = logging.getLogger("stockbot")
 
+UPSTREAM_ERROR_MESSAGE = (
+    "That data source is not available right now. Wait a bit and try again."
+)
+
 
 class StockBot(discord.Client):
     def __init__(self) -> None:
@@ -49,7 +53,7 @@ async def send_chart(interaction: discord.Interaction, symbol: str, range_key: s
         image, filename, description = await asyncio.to_thread(build_chart, symbol, chart_range)
     except Exception as exc:
         logger.exception("Failed to build chart for %s", symbol)
-        await interaction.followup.send(f"Could not get `{symbol}` data: {exc}", ephemeral=True)
+        await interaction.followup.send(f"Could not get `{symbol}` data. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
 
     file = discord.File(image, filename=filename)
@@ -121,7 +125,7 @@ async def info(interaction: discord.Interaction, symbol: str) -> None:
         data = await asyncio.to_thread(get_info, symbol)
     except Exception as exc:
         logger.exception("Failed to get info for %s", symbol)
-        await interaction.followup.send(f"Could not get `{symbol}` info: {exc}", ephemeral=True)
+        await interaction.followup.send(f"Could not get `{symbol}` info. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
 
     description = data.get("summary")
@@ -178,7 +182,7 @@ async def news(interaction: discord.Interaction, symbol: str) -> None:
         articles = await asyncio.to_thread(get_news, symbol, 5)
     except Exception as exc:
         logger.exception("Failed to get news for %s", symbol)
-        await interaction.followup.send(f"Could not get `{symbol}` news: {exc}", ephemeral=True)
+        await interaction.followup.send(f"Could not get `{symbol}` news. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
 
     if not articles:

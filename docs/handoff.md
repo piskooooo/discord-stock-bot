@@ -129,7 +129,7 @@ After the image builds, the user updates the Unraid Docker container by pulling 
 - Consider a `/weekly` command that summarizes broad market movement plus tickers discussed in the Discord group that week.
 - Consider lightweight caching to reduce Yahoo calls and avoid rate limits.
 - Improve `/info` richness if a more stable no-key data source is chosen.
-- Update README wording around data source details. It still mentions `yfinance` broadly, while the current chart/news path mostly uses direct Yahoo endpoints with `yfinance` as a fallback.
+- Consider adding a public support/contact URL if the bot is ever distributed beyond the private friend-group server.
 
 ## Known Bugs And Fragile Areas
 
@@ -163,3 +163,4 @@ The repo was audited for obvious public-safety issues. At the time of this hando
 - Current reachable commits use a GitHub no-reply email.
 - The public README does not include personal email, NAS IP, Discord guild ID, or token.
 - Placeholder token examples are okay and intentional.
+- `PRIVACY.md`, `TERMS.md`, and `docs/compliance.md` document the current private-server posture, user-data handling, data-source attribution, and financial disclaimer expectations.
