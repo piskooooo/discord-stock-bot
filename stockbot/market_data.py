@@ -217,6 +217,18 @@ def _candle_width(date_numbers: list[float]) -> float:
 
 
 def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
+    if history.attrs.get("flat_closed_session"):
+        date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
+        price = float(history["Close"].iloc[-1])
+        ax.plot(
+            date_numbers,
+            [price] * len(date_numbers),
+            color=CHART_COLORS["muted"],
+            linewidth=2.2,
+            alpha=0.95,
+        )
+        return
+
     ha = _heikin_ashi(history)
     date_numbers = mdates.date2num(ha.index.to_pydatetime()).tolist()
     width = _candle_width(date_numbers)
@@ -261,6 +273,12 @@ def _format_volume(value: float, _position: int) -> str:
 
 
 def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
+    if history.attrs.get("flat_closed_session"):
+        ax.set_ylabel("Volume")
+        ax.set_ylim(0, 1)
+        ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
+        return
+
     if "Volume" not in history or history["Volume"].sum() <= 0:
         ax.set_visible(False)
         return
@@ -291,7 +309,28 @@ def _regular_session_history(history: pd.DataFrame) -> pd.DataFrame:
         for local_time in local_times
     ]
     session_history = history.loc[mask]
-    return session_history if not session_history.empty else history
+    return session_history if not session_history.empty else _flat_closed_session_history(history)
+
+
+def _flat_closed_session_history(history: pd.DataFrame) -> pd.DataFrame:
+    market_date = history.index[-1].astimezone(MARKET_TZ).date()
+    market_open = datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)
+    market_close = datetime.combine(market_date, REGULAR_MARKET_CLOSE, MARKET_TZ)
+    price = float(history["Close"].iloc[-1])
+    index = pd.date_range(market_open, market_close, freq="5min")
+    flat_history = pd.DataFrame(
+        {
+            "Open": price,
+            "High": price,
+            "Low": price,
+            "Close": price,
+            "Volume": 0,
+        },
+        index=index,
+    )
+    flat_history.index.name = history.index.name
+    flat_history.attrs["flat_closed_session"] = True
+    return flat_history
 
 
 def _set_price_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
@@ -409,6 +448,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         f"Last: `${last_price:,.2f}` | Change: `{change:+.2f}` "
         f"(`{percent:+.2f}%`) | Trend: `{arrow}`"
     )
+    if display_history.attrs.get("flat_closed_session"):
+        description += " | Market closed"
     filename = f"{symbol.lower()}-{chart_range.period}-{chart_range.interval}.png"
     return image, filename, description
 
