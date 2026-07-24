@@ -50,7 +50,7 @@ async def send_chart(interaction: discord.Interaction, symbol: str, range_key: s
     symbol = clean_symbol(symbol)
 
     try:
-        image, filename, description = await asyncio.to_thread(build_chart, symbol, chart_range)
+        image, filename, summary = await asyncio.to_thread(build_chart, symbol, chart_range)
     except Exception as exc:
         logger.exception("Failed to build chart for %s", symbol)
         await interaction.followup.send(f"Could not get `{symbol}` data. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
@@ -59,11 +59,10 @@ async def send_chart(interaction: discord.Interaction, symbol: str, range_key: s
     file = discord.File(image, filename=filename)
     embed = discord.Embed(
         title=f"{symbol} - {chart_range.label}",
-        description=description,
-        color=discord.Color.green() if "Trend: `up`" in description else discord.Color.red(),
+        color=discord.Color.green() if "Trend: up" in summary else discord.Color.red(),
     )
     embed.set_image(url=f"attachment://{filename}")
-    embed.set_footer(text="Data from Yahoo Finance. For fun, not financial advice.")
+    embed.set_footer(text="Data from Yahoo Finance.")
     await interaction.followup.send(embed=embed, file=file)
 
 

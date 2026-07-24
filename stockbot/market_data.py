@@ -382,6 +382,12 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     symbol = clean_symbol(symbol)
     change, percent, arrow = _change_text(display_history)
     last_price = float(display_history["Close"].iloc[-1])
+    summary = (
+        f"Last: ${last_price:,.2f} | Change: {change:+.2f} "
+        f"({percent:+.2f}%) | Trend: {arrow}"
+    )
+    if display_history.attrs.get("flat_closed_session"):
+        summary += " | Market closed"
 
     fig, (ax, volume_ax) = plt.subplots(
         2,
@@ -400,11 +406,21 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     _set_price_ylim(ax, display_history)
     _set_volume_ylim(volume_ax, display_history)
 
-    ax.set_title(
-        f"{symbol} - {chart_range.label} Heikin-Ashi",
+    fig.suptitle(
+        f"{symbol} - {chart_range.label}",
         color=CHART_COLORS["text"],
         fontsize=15,
         fontweight="bold",
+        y=0.98,
+    )
+    fig.text(
+        0.5,
+        0.935,
+        summary,
+        color=CHART_COLORS["muted"],
+        fontsize=10.5,
+        ha="center",
+        va="top",
     )
     ax.set_ylabel("Price")
     volume_ax.set_xlabel("")
@@ -431,7 +447,7 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         _set_regular_session_ticks(volume_ax, display_history)
 
     fig.autofmt_xdate()
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
 
     image = BytesIO()
     fig.savefig(
@@ -444,14 +460,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     plt.close(fig)
     image.seek(0)
 
-    description = (
-        f"Last: `${last_price:,.2f}` | Change: `{change:+.2f}` "
-        f"(`{percent:+.2f}%`) | Trend: `{arrow}`"
-    )
-    if display_history.attrs.get("flat_closed_session"):
-        description += " | Market closed"
     filename = f"{symbol.lower()}-{chart_range.period}-{chart_range.interval}.png"
-    return image, filename, description
+    return image, filename, summary
 
 
 def get_info(symbol: str) -> dict[str, Any]:

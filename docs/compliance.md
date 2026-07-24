@@ -36,7 +36,7 @@ This project is a private friend-group Discord bot, not a commercial financial p
 
 ## Financial Disclaimer
 
-- Keep "not financial advice" language in chart embeds, docs, and terms.
+- Keep general usage disclaimers in the public docs and terms.
 - Do not add trading automation, alerts that imply guarantees, recommendations, or personalized investment advice without a dedicated legal/product review.
 
 ## Deployment

@@ -27,7 +27,7 @@ Current commands:
 - `/info SYMBOL`: basic quote/company info.
 - `/news SYMBOL`: recent news.
 
-Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, and Yahoo Finance data. `/mi` is special: it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart.
+Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. `/mi` is special: it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart.
 
 ## Repo Structure
 
