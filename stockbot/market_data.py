@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from io import BytesIO
+from itertools import pairwise
 from typing import Any
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
@@ -13,11 +16,11 @@ matplotlib.use("Agg")
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from matplotlib.ticker import FixedLocator, FuncFormatter
 import pandas as pd
 import requests
 import yfinance as yf
+from matplotlib.patches import Rectangle
+from matplotlib.ticker import FixedLocator, FuncFormatter
 
 
 @dataclass(frozen=True)
@@ -61,9 +64,23 @@ HEADERS = {
     )
 }
 
+SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.^=-]{1,30}$")
+CRYPTO_QUOTE_SUFFIXES = ("-AUD", "-CAD", "-CHF", "-EUR", "-GBP", "-JPY", "-USD", "-USDT")
+
 
 def clean_symbol(symbol: str) -> str:
-    return symbol.strip().upper().replace("$", "")
+    cleaned = symbol.strip().upper().removeprefix("$")
+
+    if not SYMBOL_PATTERN.fullmatch(cleaned):
+        raise ValueError(
+            "Enter a valid ticker symbol, for example `AAPL`, `BRK-B`, or `BTC-USD`."
+        )
+
+    return cleaned
+
+
+def _is_crypto_symbol(symbol: str) -> bool:
+    return symbol.endswith(CRYPTO_QUOTE_SUFFIXES)
 
 
 def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
@@ -139,22 +156,50 @@ def _get_quote(symbol: str) -> dict[str, Any]:
         return {}
 
     meta = result.get("meta") or {}
+    timestamps = result.get("timestamp") or []
     quote = result.get("indicators", {}).get("quote", [{}])[0]
-    opens = [value for value in quote.get("open", []) if value is not None]
-    lows = [value for value in quote.get("low", []) if value is not None]
-    highs = [value for value in quote.get("high", []) if value is not None]
+    opens = quote.get("open") or []
+    lows = quote.get("low") or []
+    highs = quote.get("high") or []
+    regular_opens: list[float] = []
+    regular_lows: list[float] = []
+    regular_highs: list[float] = []
+
+    for index, timestamp in enumerate(timestamps):
+        local_time = (
+            datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            .astimezone(MARKET_TZ)
+            .time()
+        )
+        if not REGULAR_MARKET_OPEN <= local_time <= REGULAR_MARKET_CLOSE:
+            continue
+
+        if index < len(opens) and opens[index] is not None:
+            regular_opens.append(opens[index])
+        if index < len(lows) and lows[index] is not None:
+            regular_lows.append(lows[index])
+        if index < len(highs) and highs[index] is not None:
+            regular_highs.append(highs[index])
 
     return {
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName"),
         "fullExchangeName": meta.get("fullExchangeName") or meta.get("exchangeName"),
         "regularMarketPrice": meta.get("regularMarketPrice"),
-        "regularMarketPreviousClose": meta.get("chartPreviousClose") or meta.get("previousClose"),
-        "regularMarketOpen": opens[0] if opens else None,
-        "regularMarketDayLow": min(lows) if lows else None,
-        "regularMarketDayHigh": max(highs) if highs else None,
+        "regularMarketPreviousClose": meta.get("chartPreviousClose")
+        or meta.get("previousClose"),
+        "regularMarketOpen": regular_opens[0]
+        if regular_opens
+        else meta.get("regularMarketOpen"),
+        "regularMarketDayLow": min(regular_lows)
+        if regular_lows
+        else meta.get("regularMarketDayLow"),
+        "regularMarketDayHigh": max(regular_highs)
+        if regular_highs
+        else meta.get("regularMarketDayHigh"),
         "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
         "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"),
+        "marketCap": meta.get("marketCap"),
     }
 
 
@@ -174,9 +219,11 @@ def _get_search_profile(symbol: str) -> dict[str, Any]:
     return quotes[0] if quotes else {}
 
 
-def _change_text(history: pd.DataFrame) -> tuple[float, float, str]:
+def _change_text(
+    history: pd.DataFrame, last_price: float | None = None
+) -> tuple[float, float, str]:
     first = float(history["Close"].iloc[0])
-    last = float(history["Close"].iloc[-1])
+    last = float(history["Close"].iloc[-1]) if last_price is None else last_price
     change = last - first
     percent = (change / first) * 100 if first else 0
     arrow = "up" if change >= 0 else "down"
@@ -204,11 +251,7 @@ def _candle_width(date_numbers: list[float]) -> float:
     if len(date_numbers) < 2:
         return 0.6
 
-    gaps = [
-        later - earlier
-        for earlier, later in zip(date_numbers, date_numbers[1:])
-        if later > earlier
-    ]
+    gaps = [later - earlier for earlier, later in pairwise(date_numbers) if later > earlier]
 
     if not gaps:
         return 0.6
@@ -302,18 +345,48 @@ def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
 
 
-def _regular_session_history(history: pd.DataFrame) -> pd.DataFrame:
-    local_times = [index.astimezone(MARKET_TZ).time() for index in history.index]
+def _regular_session_history(
+    history: pd.DataFrame,
+    market_date: date | None = None,
+) -> pd.DataFrame:
+    market_date = market_date or datetime.now(MARKET_TZ).date()
+    local_datetimes = [index.astimezone(MARKET_TZ) for index in history.index]
     mask = [
-        REGULAR_MARKET_OPEN <= local_time <= REGULAR_MARKET_CLOSE
-        for local_time in local_times
+        local_datetime.date() == market_date
+        and REGULAR_MARKET_OPEN <= local_datetime.time() <= REGULAR_MARKET_CLOSE
+        for local_datetime in local_datetimes
     ]
     session_history = history.loc[mask]
-    return session_history if not session_history.empty else _flat_closed_session_history(history)
+    return (
+        session_history
+        if not session_history.empty
+        else _flat_closed_session_history(history, market_date)
+    )
 
 
-def _flat_closed_session_history(history: pd.DataFrame) -> pd.DataFrame:
-    market_date = history.index[-1].astimezone(MARKET_TZ).date()
+def _latest_regular_session_history(history: pd.DataFrame) -> pd.DataFrame:
+    local_datetimes = [index.astimezone(MARKET_TZ) for index in history.index]
+    regular_mask = [
+        REGULAR_MARKET_OPEN <= local_datetime.time() <= REGULAR_MARKET_CLOSE
+        for local_datetime in local_datetimes
+    ]
+    regular_history = history.loc[regular_mask]
+    if regular_history.empty:
+        return history
+
+    latest_date = regular_history.index[-1].astimezone(MARKET_TZ).date()
+    latest_mask = [
+        index.astimezone(MARKET_TZ).date() == latest_date
+        for index in regular_history.index
+    ]
+    return regular_history.loc[latest_mask]
+
+
+def _flat_closed_session_history(
+    history: pd.DataFrame,
+    market_date: date | None = None,
+) -> pd.DataFrame:
+    market_date = market_date or datetime.now(MARKET_TZ).date()
     market_open = datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)
     market_close = datetime.combine(market_date, REGULAR_MARKET_CLOSE, MARKET_TZ)
     price = float(history["Close"].iloc[-1])
@@ -377,11 +450,21 @@ def _format_intraday_tick(value: float, _position: int) -> str:
 
 
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
-    history = get_history(symbol, chart_range)
-    display_history = _regular_session_history(history) if chart_range.show_full_trading_day else history
     symbol = clean_symbol(symbol)
-    change, percent, arrow = _change_text(display_history)
+    history = get_history(symbol, chart_range)
+    use_regular_session = chart_range.show_full_trading_day and not _is_crypto_symbol(symbol)
+    display_history = (
+        _regular_session_history(history)
+        if use_regular_session
+        else history
+    )
     last_price = float(display_history["Close"].iloc[-1])
+    change_history = (
+        _latest_regular_session_history(history)
+        if display_history.attrs.get("flat_closed_session")
+        else display_history
+    )
+    change, percent, arrow = _change_text(change_history, last_price)
     summary = (
         f"Last: ${last_price:,.2f} | Change: {change:+.2f} "
         f"({percent:+.2f}%) | Trend: {arrow}"
@@ -442,12 +525,12 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     else:
         volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
 
-    if chart_range.show_full_trading_day:
+    if use_regular_session:
         _set_regular_session_xlim(ax, display_history)
         _set_regular_session_ticks(volume_ax, display_history)
 
     fig.autofmt_xdate()
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    fig.subplots_adjust(left=0.07, right=0.91, bottom=0.18, top=0.88, hspace=0.04)
 
     image = BytesIO()
     fig.savefig(
@@ -468,18 +551,18 @@ def get_info(symbol: str) -> dict[str, Any]:
     symbol = clean_symbol(symbol)
     try:
         quote = _get_quote(symbol)
-    except Exception:
+    except Exception:  # noqa: BLE001 - each source is an optional best-effort fallback.
         quote = {}
 
     try:
         search_profile = _get_search_profile(symbol)
-    except Exception:
+    except Exception:  # noqa: BLE001 - each source is an optional best-effort fallback.
         search_profile = {}
 
     ticker = yf.Ticker(symbol)
     try:
         info = ticker.get_info()
-    except Exception:
+    except Exception:  # noqa: BLE001 - yfinance can raise several backend exception types.
         info = {}
 
     return {
@@ -555,6 +638,9 @@ def format_money(value: Any) -> str:
         value = float(value)
     except (TypeError, ValueError):
         return str(value)
+
+    if not math.isfinite(value):
+        return "n/a"
 
     if abs(value) >= 1_000_000_000_000:
         return f"${value / 1_000_000_000_000:.2f}T"

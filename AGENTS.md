@@ -21,6 +21,7 @@ This is a small Discord stock bot for a private friend-group server. It provides
 
 ```bash
 python3 -m py_compile stockbot/bot.py stockbot/market_data.py
+python -m unittest discover -s tests -v
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

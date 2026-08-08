@@ -8,11 +8,35 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  build-and-push:
+  test:
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run checks
+        run: |
+          python -m py_compile stockbot/bot.py stockbot/market_data.py
+          python -m unittest discover -s tests -v
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Check out repository

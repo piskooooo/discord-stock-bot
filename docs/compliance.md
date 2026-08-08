@@ -1,6 +1,6 @@
 # Compliance Notes
 
-Last reviewed: 2026-07-02
+Last reviewed: 2026-08-08
 
 This project is a private friend-group Discord bot, not a commercial financial product. These notes are an engineering checklist, not legal advice.
 
@@ -19,6 +19,8 @@ This project is a private friend-group Discord bot, not a commercial financial p
 - Keep `.env` in `.gitignore` and `.dockerignore`.
 - Keep runtime secrets in Unraid environment variables or another host secret mechanism.
 - Do not bake secrets into Docker images.
+- Run the container as an unprivileged user.
+- Audit pinned Python dependencies for known vulnerabilities during maintenance passes.
 
 ## Yahoo Finance And Market Data
 

@@ -27,7 +27,7 @@ Current commands:
 - `/info SYMBOL`: basic quote/company info.
 - `/news SYMBOL`: recent news.
 
-Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. `/mi` is special: it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart.
+Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. `/mi` is special: for stocks it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart. Common Yahoo crypto pairs such as `BTC-USD` keep their continuous history instead of being forced into stock-market hours.
 
 ## Repo Structure
 
@@ -43,10 +43,12 @@ Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/vol
 ├── docker-compose.yml
 ├── docs/handoff.md
 ├── requirements.txt
-└── stockbot
-    ├── __init__.py
-    ├── bot.py
-    └── market_data.py
+├── stockbot
+│   ├── __init__.py
+│   ├── bot.py
+│   └── market_data.py
+└── tests
+    └── test_market_data.py
 ```
 
 `stockbot/bot.py` owns Discord client setup, slash command registration, embeds, and user-facing command behavior.
@@ -79,6 +81,7 @@ Syntax smoke test:
 
 ```bash
 python3 -m py_compile stockbot/bot.py stockbot/market_data.py
+python -m unittest discover -s tests -v
 ```
 
 Docker Compose:
@@ -101,6 +104,7 @@ Normal update flow after code changes:
 ```bash
 git status --short --branch
 python3 -m py_compile stockbot/bot.py stockbot/market_data.py
+python -m unittest discover -s tests -v
 git add .
 git commit -m "Concise change summary"
 git push
@@ -120,11 +124,13 @@ After the image builds, the user updates the Unraid Docker container by pulling 
 - `yfinance` remains only as a best-effort richer profile source for `/info`; it frequently returns incomplete data or can be blocked.
 - `/info` intentionally degrades gracefully to basic quote/search data if richer Yahoo profile data fails.
 - GHCR publishing is automated with GitHub Actions. The repo and package are public so Unraid can pull without auth.
+- GitHub Actions runs syntax checks and unit tests before building or publishing an image.
+- The production container runs as an unprivileged `stockbot` user.
 - Secrets are not stored in the repo or image. They live in Unraid environment variables.
 
 ## Open Tasks
 
-- Add real automated tests around Heikin-Ashi calculations, chart range handling, Yahoo response parsing, and `/info` fallback behavior.
+- Expand automated coverage around full chart image rendering and additional malformed Yahoo responses.
 - Consider adding command usage logging for future weekly summaries.
 - Consider a `/weekly` command that summarizes broad market movement plus tickers discussed in the Discord group that week.
 - Consider lightweight caching to reduce Yahoo calls and avoid rate limits.
@@ -136,7 +142,7 @@ After the image builds, the user updates the Unraid Docker container by pulling 
 - Yahoo Finance endpoints are unofficial and can return `401`, `429`, empty data, or changed schemas.
 - `/news` uses Yahoo RSS and may have sparse or inconsistent publisher/date data.
 - `/info` can show `n/a` for market cap or summary because the richer profile endpoint is unreliable.
-- No automated tests exist yet; current verification is `py_compile`, manual Discord testing, and GitHub Actions Docker build success.
+- Automated tests cover ticker validation, Heikin-Ashi calculations, regular/closed-session selection, quote-session filtering, and `/info` fallback behavior. Full Discord interaction testing remains manual.
 - Slash command sync runs on startup. If `DISCORD_GUILD_ID` is set, commands sync quickly to that guild; global commands can take much longer.
 - The public GHCR image must remain public for simple Unraid pulls without registry login.
 - `docker-compose.yml` includes a bind mount for local development/Dockge-style workflows. The GHCR image deployment on Unraid does not need that bind mount.

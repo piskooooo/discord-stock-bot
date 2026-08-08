@@ -7,8 +7,14 @@ import os
 import discord
 from discord import app_commands
 
-from stockbot.market_data import RANGES, build_chart, clean_symbol, format_money, get_info, get_news
-
+from stockbot.market_data import (
+    RANGES,
+    build_chart,
+    clean_symbol,
+    format_money,
+    get_info,
+    get_news,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -32,10 +38,13 @@ class StockBot(discord.Client):
         guild_id = os.getenv("DISCORD_GUILD_ID")
 
         if guild_id:
-            guild = discord.Object(id=int(guild_id))
+            try:
+                guild = discord.Object(id=int(guild_id))
+            except ValueError:
+                raise RuntimeError("DISCORD_GUILD_ID must be a numeric Discord server ID.") from None
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
-            logger.info("Synced %s commands to guild %s", len(synced), guild_id)
+            logger.info("Synced %s commands to the configured guild", len(synced))
         else:
             synced = await self.tree.sync()
             logger.info("Synced %s global commands", len(synced))
@@ -47,11 +56,16 @@ bot = StockBot()
 async def send_chart(interaction: discord.Interaction, symbol: str, range_key: str) -> None:
     await interaction.response.defer(thinking=True)
     chart_range = RANGES[range_key]
-    symbol = clean_symbol(symbol)
+
+    try:
+        symbol = clean_symbol(symbol)
+    except ValueError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
 
     try:
         image, filename, summary = await asyncio.to_thread(build_chart, symbol, chart_range)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to build chart for %s", symbol)
         await interaction.followup.send(f"Could not get `{symbol}` data. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
@@ -118,11 +132,16 @@ async def all_time(interaction: discord.Interaction, symbol: str) -> None:
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def info(interaction: discord.Interaction, symbol: str) -> None:
     await interaction.response.defer(thinking=True)
-    symbol = clean_symbol(symbol)
+
+    try:
+        symbol = clean_symbol(symbol)
+    except ValueError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
 
     try:
         data = await asyncio.to_thread(get_info, symbol)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to get info for %s", symbol)
         await interaction.followup.send(f"Could not get `{symbol}` info. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
@@ -133,7 +152,7 @@ async def info(interaction: discord.Interaction, symbol: str) -> None:
         description = " / ".join(parts) if parts else "Basic quote information."
 
     embed = discord.Embed(
-        title=f"{data['name']} ({data['symbol']})",
+        title=f"{data['name']} ({data['symbol']})"[:256],
         description=description[:900],
         color=discord.Color.blurple(),
     )
@@ -165,7 +184,7 @@ async def info(interaction: discord.Interaction, symbol: str) -> None:
         )
 
     if data.get("website"):
-        embed.add_field(name="Website", value=data["website"], inline=False)
+        embed.add_field(name="Website", value=str(data["website"])[:1024], inline=False)
 
     embed.set_footer(text=f"As of {data['as_of']}. Data from Yahoo Finance.")
     await interaction.followup.send(embed=embed)
@@ -175,11 +194,16 @@ async def info(interaction: discord.Interaction, symbol: str) -> None:
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def news(interaction: discord.Interaction, symbol: str) -> None:
     await interaction.response.defer(thinking=True)
-    symbol = clean_symbol(symbol)
+
+    try:
+        symbol = clean_symbol(symbol)
+    except ValueError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
 
     try:
         articles = await asyncio.to_thread(get_news, symbol, 5)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to get news for %s", symbol)
         await interaction.followup.send(f"Could not get `{symbol}` news. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
@@ -204,7 +228,7 @@ async def news(interaction: discord.Interaction, symbol: str) -> None:
         if link:
             value += f"\n{link}"
 
-        embed.add_field(name=title, value=value[:1024], inline=False)
+        embed.add_field(name=title, value=value[:700], inline=False)
 
     embed.set_footer(text="News from Yahoo Finance.")
     await interaction.followup.send(embed=embed)

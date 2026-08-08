@@ -73,16 +73,21 @@ docker compose down
 
 ## Unraid notes
 
-The easiest path on Unraid is to put this folder in an appdata directory, create the `.env` file, then run it with Docker Compose.
+The production image is published to:
 
-If you use the Unraid Compose Manager plugin:
+```text
+ghcr.io/piskooooo/discord-stock-bot:latest
+```
 
-1. Create a new stack.
-2. Point it at this folder or paste the `docker-compose.yml`.
-3. Add the `.env` file beside the compose file.
-4. Build and start the stack.
+Create a normal Unraid Docker container with that repository and add these variables:
 
-The container does not need GPU access. Ollama is not used.
+- `DISCORD_TOKEN`: required bot token.
+- `DISCORD_GUILD_ID`: optional private server ID for fast command updates.
+- `LOG_LEVEL`: optional; defaults to `INFO`.
+
+After a new image is published, force an update or pull the latest image and restart the container. Docker Compose remains available for local development from a checked-out copy of the repository.
+
+The container does not need storage mounts, GPU access, Redis, a database, or Ollama.
 
 ## Local non-Docker run
 
@@ -92,6 +97,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -m stockbot.bot
 ```
+
+## Tests
+
+```bash
+python3 -m py_compile stockbot/bot.py stockbot/market_data.py
+python -m unittest discover -s tests -v
+```
+
+GitHub Actions runs these checks before publishing a Docker image.
 
 ## Data source
 
