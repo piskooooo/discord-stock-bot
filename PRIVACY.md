@@ -14,7 +14,7 @@ The bot does not request Discord message content intent, does not read general c
 
 The bot does not intentionally store Discord user data, command history, ticker requests, chart images, or Yahoo Finance response data in an application database.
 
-Operational logs may contain basic runtime events and error details. Do not configure logs to include Discord tokens, private server IDs, screenshots, or other secrets.
+Operational logs may contain basic runtime events, requested ticker symbols when a command fails, and error details including a traceback for operator troubleshooting. Do not configure logs to include Discord tokens, private server IDs, screenshots, or other secrets.
 
 Runtime secrets such as `DISCORD_TOKEN` and optional `DISCORD_GUILD_ID` must be supplied through environment variables on the host and must not be committed to the repository or baked into Docker images.
 

@@ -6,11 +6,11 @@ This bot is intended for private friend-group servers. It is for fun and conveni
 
 ## Commands
 
-Each chart command returns a Heikin-Ashi candle chart with volume and takes a ticker symbol, such as `AAPL`, `MSFT`, `TSLA`, `SPY`, or `BTC-USD`.
+Each chart command returns a dark-mode Heikin-Ashi candle chart with volume, an in-image quote summary, and Yahoo Finance attribution. Ticker symbols can include common Yahoo formats such as `AAPL`, `BRK-B`, `^GSPC`, or `BTC-USD`.
 
 | Command | Range |
 | --- | --- |
-| `/mi` | 5-minute candles for the current trading day |
+| `/mi` | 5-minute stock candles for the current regular session; closed stock sessions show a flat line |
 | `/da` | 1-day chart |
 | `/we` | 1-week chart |
 | `/mo` | 1-month chart |
@@ -20,6 +20,8 @@ Each chart command returns a Heikin-Ashi candle chart with volume and takes a ti
 | `/all` | All available history |
 | `/info` | Basic company and quote information |
 | `/news` | Recent stock news |
+
+`/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
 
 ## Create the Discord bot
 
@@ -91,8 +93,10 @@ The container does not need storage mounts, GPU access, Redis, a database, or Ol
 
 ## Local non-Docker run
 
+The container uses Python 3.12. Python 3.12 is recommended for local runs as well.
+
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python -m stockbot.bot
@@ -103,9 +107,10 @@ python -m stockbot.bot
 ```bash
 python3 -m py_compile stockbot/bot.py stockbot/market_data.py
 python -m unittest discover -s tests -v
+uvx pip-audit -r requirements.txt
 ```
 
-GitHub Actions runs these checks before publishing a Docker image.
+GitHub Actions runs the syntax check and test suite before publishing a Docker image. `pip-audit` is a local maintenance check for known dependency vulnerabilities.
 
 ## Data source
 

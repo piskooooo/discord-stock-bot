@@ -16,7 +16,7 @@ https://github.com/piskooooo/discord-stock-bot
 
 Current commands:
 
-- `/mi SYMBOL`: 5-minute Heikin-Ashi candles for the current trading day.
+- `/mi SYMBOL`: 5-minute Heikin-Ashi candles for the current regular stock-market session; closed stock sessions show a flat carry-forward line. Common crypto pairs such as `BTC-USD` keep continuous history.
 - `/da SYMBOL`: 1-day chart.
 - `/we SYMBOL`: 1-week chart.
 - `/mo SYMBOL`: 1-month chart.
@@ -130,7 +130,7 @@ After the image builds, the user updates the Unraid Docker container by pulling 
 
 ## Open Tasks
 
-- Expand automated coverage around full chart image rendering and additional malformed Yahoo responses.
+- Expand automated coverage around additional malformed Yahoo responses.
 - Consider adding command usage logging for future weekly summaries.
 - Consider a `/weekly` command that summarizes broad market movement plus tickers discussed in the Discord group that week.
 - Consider lightweight caching to reduce Yahoo calls and avoid rate limits.
@@ -142,7 +142,7 @@ After the image builds, the user updates the Unraid Docker container by pulling 
 - Yahoo Finance endpoints are unofficial and can return `401`, `429`, empty data, or changed schemas.
 - `/news` uses Yahoo RSS and may have sparse or inconsistent publisher/date data.
 - `/info` can show `n/a` for market cap or summary because the richer profile endpoint is unreliable.
-- Automated tests cover ticker validation, Heikin-Ashi calculations, regular/closed-session selection, quote-session filtering, and `/info` fallback behavior. Full Discord interaction testing remains manual.
+- Automated tests cover ticker validation, Heikin-Ashi calculations, regular/closed-session selection, quote-session filtering, `/info` fallback behavior, and PNG chart rendering. Full Discord interaction testing remains manual.
 - Slash command sync runs on startup. If `DISCORD_GUILD_ID` is set, commands sync quickly to that guild; global commands can take much longer.
 - The public GHCR image must remain public for simple Unraid pulls without registry login.
 - `docker-compose.yml` includes a bind mount for local development/Dockge-style workflows. The GHCR image deployment on Unraid does not need that bind mount.

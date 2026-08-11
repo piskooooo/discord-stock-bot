@@ -1,6 +1,6 @@
 # Compliance Notes
 
-Last reviewed: 2026-08-08
+Last reviewed: 2026-08-10
 
 This project is a private friend-group Discord bot, not a commercial financial product. These notes are an engineering checklist, not legal advice.
 
@@ -44,4 +44,4 @@ This project is a private friend-group Discord bot, not a commercial financial p
 ## Deployment
 
 - Public GHCR image is acceptable only if it contains code and dependencies, not secrets.
-- After code changes, run `python3 -m py_compile stockbot/bot.py stockbot/market_data.py`, commit, push to `main`, and verify the GitHub Actions Docker image workflow succeeds.
+- After code changes, run `python3 -m py_compile stockbot/bot.py stockbot/market_data.py`, `python -m unittest discover -s tests -v`, commit, push to `main`, and verify the GitHub Actions Docker image workflow succeeds.
