@@ -7,8 +7,6 @@ This is a small Discord stock bot for a private friend-group server. It provides
 ## Canonical Project Root
 
 - Work from `/Users/pisko/Documents/discord-stock-bot`.
-- If a Codex thread opens inside an older `/Users/pisko/Documents/Codex/...` wrapper folder, switch to this repo before reading or editing files.
-- At the start of new project threads, confirm `pwd` is this folder and run `git status --short --branch`.
 
 ## Current Deployment
 
