@@ -331,29 +331,55 @@ def _format_volume(value: float, _position: int) -> str:
 
 
 def _draw_volume(ax: plt.Axes, history: pd.DataFrame, interval: str = "1d") -> None:
+    label = "VOLUME"
     if "Volume" not in history or history["Volume"].sum() <= 0:
         ax.set_ylim(0, 1)
         ax.set_yticks([])
-        return
+    else:
+        date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
+        width = _candle_width(date_numbers, interval) * 0.75
+        # Measure after the shared time limits and layout are finalized so the
+        # rounded strokes stay narrower than their corresponding candles.
+        left = ax.transData.transform((date_numbers[0], 0))[0]
+        right = ax.transData.transform((date_numbers[0] + width, 0))[0]
+        linewidth = max(0.4, (right - left) * 72 / ax.figure.dpi)
+        colors = [
+            CHART_COLORS["up"] if close >= open_ else CHART_COLORS["down"]
+            for open_, close in zip(history["Open"], history["Close"])
+        ]
+        # Retain raw heights; only the axes clip an isolated extreme spike.
+        positive = history["Volume"] > 0
+        ax.vlines(
+            [value for value, keep in zip(date_numbers, positive) if keep],
+            0, history.loc[positive, "Volume"],
+            colors=[color for color, keep in zip(colors, positive) if keep],
+            linewidth=linewidth, capstyle="round", zorder=3,
+        )
+        ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
 
-    date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
-    width = _candle_width(date_numbers, interval)
-    colors = [
-        CHART_COLORS["up"] if close >= open_ else CHART_COLORS["down"]
-        for open_, close in zip(history["Open"], history["Close"])
-    ]
+        ceiling = ax.get_ylim()[1]
+        for x_value, volume in zip(date_numbers, history["Volume"]):
+            if not volume > ceiling:
+                continue
+            label = "VOLUME · spike clipped"
+            ax.text(
+                x_value, 0.78, "//", transform=ax.get_xaxis_transform(),
+                ha="center", va="center", color=CHART_COLORS["text"],
+                fontsize=9, fontweight="bold", zorder=4,
+                bbox={"facecolor": CHART_COLORS["axes"], "edgecolor": "none", "pad": 0.3},
+            )
+            x_position = (x_value - ax.get_xlim()[0]) / (ax.get_xlim()[1] - ax.get_xlim()[0])
+            near_right = x_position > 0.85
+            ax.annotate(
+                _format_volume(float(volume), 0),
+                (x_value, 0.60 if x_position < 0.2 else 0.97),
+                xycoords=ax.get_xaxis_transform(), xytext=(-7 if near_right else 7, 0),
+                textcoords="offset points", ha="right" if near_right else "left",
+                va="top", fontsize=8, color=CHART_COLORS["text"], zorder=4,
+            )
 
-    ax.bar(
-        date_numbers,
-        history["Volume"],
-        width=width,
-        color=colors,
-        alpha=0.9,
-        linewidth=0,
-        align="center",
-        zorder=3,
-    )
-    ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
+    ax.text(0.008, 0.94, label, transform=ax.transAxes,
+            color=CHART_COLORS["muted"], fontsize=7, va="top", zorder=4)
 
 
 def _single_day_history(
@@ -434,8 +460,20 @@ def _set_price_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
 
 
 def _set_volume_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
-    if "Volume" in history and history["Volume"].sum() > 0:
-        ax.set_ylim(0, float(history["Volume"].max()) * 1.18)
+    if "Volume" not in history:
+        return
+    positive = history.loc[history["Volume"] > 0, "Volume"]
+    if positive.empty:
+        return
+    peak = float(positive.max())
+    ceiling = peak * 1.18
+    # Only trim a single extreme outlier with enough surrounding observations.
+    # Sparse samples and broad volume surges keep their full linear scale.
+    if len(positive) >= 20:
+        second_largest = float(positive.nlargest(2).iloc[1])
+        if peak >= second_largest * 5:
+            ceiling = second_largest * 1.25
+    ax.set_ylim(0, ceiling)
 
 
 def _set_intraday_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
@@ -546,7 +584,7 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         figsize=(11.2, 6.4),
         dpi=150,
         sharex=True,
-        gridspec_kw={"height_ratios": [4, 1], "hspace": 0.045},
+        gridspec_kw={"height_ratios": [3.6, 1], "hspace": 0.045},
     )
     fig.patch.set_facecolor(CHART_COLORS["background"])
     for chart_ax in (ax, volume_ax):
@@ -559,7 +597,6 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     )
     _draw_heikin_ashi_candles(ax, display_history, chart_range.interval)
     volume_ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
-    _draw_volume(volume_ax, display_history, chart_range.interval)
     _set_price_ylim(ax, display_history)
     _set_volume_ylim(volume_ax, display_history)
 
@@ -579,8 +616,6 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         ha="center",
         va="top",
     )
-    volume_ax.text(0.008, 0.92, "VOLUME", transform=volume_ax.transAxes,
-                   color=CHART_COLORS["muted"], fontsize=7, va="top")
     volume_ax.set_xlabel("")
     ax.margins(x=0.025)
 
@@ -612,6 +647,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         _set_intraday_session_ticks(volume_ax, display_history)
 
     fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=0.855)
+    volume_ax.set_xlim(ax.get_xlim())
+    _draw_volume(volume_ax, display_history, chart_range.interval)
 
     image = BytesIO()
     fig.savefig(

@@ -23,6 +23,8 @@ Each chart command returns a dark-mode Heikin-Ashi candle chart with volume, an 
 
 For stocks, `/mi` and `/da` show an 8 AM–8 PM Eastern window, with shaded premarket (8–9:30 AM) and after-hours (4–8 PM) sections across price and volume. Available extended-hours candles are included; empty future hours remain blank. `/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
 
+Volume uses slim, rounded bars on a linear scale. An isolated extreme spike may be clipped to keep the surrounding bars readable; a break marker, its actual volume, and a “spike clipped” note identify it.
+
 ## Create the Discord bot
 
 1. Go to the Discord Developer Portal.

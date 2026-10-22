@@ -18,6 +18,14 @@ def _history(rows: list[tuple[str, float, float, float, float, int]]) -> pd.Data
     return frame.set_index("Date")
 
 
+def _volume_history(volumes: list[int]) -> pd.DataFrame:
+    start = datetime(2026, 8, 7, 14, tzinfo=timezone.utc)
+    return _history([
+        ((start + timedelta(minutes=5 * index)).isoformat(), 100, 104, 99, 103, volume)
+        for index, volume in enumerate(volumes)
+    ])
+
+
 class FakeResponse:
     status_code = 200
 
@@ -279,14 +287,78 @@ class MarketDataTests(TestCase):
             with self.subTest(interval=interval):
                 figure, axes = market_data.plt.subplots(2, 1)
                 self.addCleanup(market_data.plt.close, figure)
+                candle_time = market_data.mdates.date2num(history.index[0])
+                for axis in axes:
+                    axis.set_xlim(candle_time - minutes / 1440, candle_time + minutes / 1440)
 
                 market_data._draw_heikin_ashi_candles(axes[0], history, interval)
+                market_data._set_volume_ylim(axes[1], history)
                 market_data._draw_volume(axes[1], history, interval)
 
-                for axis in axes:
-                    width = axis.patches[0].get_width()
-                    self.assertGreater(width, 0)
-                    self.assertLess(width, minutes / (24 * 60))
+                width = axes[0].patches[0].get_width()
+                self.assertGreater(width, 0)
+                self.assertLess(width, minutes / (24 * 60))
+                volume = axes[1].collections[0]
+                self.assertEqual(len(volume.get_segments()), 1)
+                left = axes[1].transData.transform((candle_time, 0))[0]
+                right = axes[1].transData.transform((candle_time + width, 0))[0]
+                candle_width_points = (right - left) * 72 / figure.dpi
+                self.assertGreater(volume.get_linewidths()[0], 0)
+                self.assertLess(volume.get_linewidths()[0], candle_width_points)
+
+    def test_isolated_volume_spike_caps_view_but_keeps_real_volume(self) -> None:
+        volumes = [100_000 + index * 10_000 for index in range(24)] + [21_000_000]
+        history = _volume_history(volumes)
+        original = history.copy(deep=True)
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            market_data.build_chart("MRNA", market_data.RANGES["da"])
+
+        self.assertAlmostEqual(axes[1].get_ylim()[1], sorted(volumes)[-2] * 1.25)
+        segments = axes[1].collections[0].get_segments()
+        self.assertEqual([segment[1, 1] for segment in segments], volumes)
+        self.assertTrue(all(segment[0, 1] == 0 for segment in segments))
+        pd.testing.assert_frame_equal(history, original)
+        labels = [text.get_text() for text in axes[1].texts]
+        self.assertIn("21.0M", labels)
+        self.assertIn("//", labels)
+        self.assertTrue(any("clipped" in label.lower() for label in labels))
+
+    def test_broad_volume_surge_keeps_full_scale(self) -> None:
+        for peaks in ([21_000_000, 18_000_000], [21_000_000, 21_000_000]):
+            with self.subTest(peaks=peaks):
+                history = _volume_history([100_000] * 24 + list(peaks))
+                figure, axis = market_data.plt.subplots()
+                self.addCleanup(market_data.plt.close, figure)
+                market_data._set_volume_ylim(axis, history)
+                market_data._draw_volume(axis, history, "5m")
+
+                self.assertAlmostEqual(axis.get_ylim()[1], max(peaks) * 1.18)
+                self.assertFalse(any("clipped" in text.get_text().lower() for text in axis.texts))
+
+    def test_sparse_positive_volume_keeps_full_scale_and_omits_zero_bars(self) -> None:
+        for volumes in (
+            [100_000] * 18 + [21_000_000],
+            [0] * 50 + [100_000, 21_000_000],
+            [0] * 30 + [21_000_000] + [0] * 20,
+        ):
+            with self.subTest(positive_count=sum(volume > 0 for volume in volumes)):
+                history = _volume_history(volumes)
+                figure, axis = market_data.plt.subplots()
+                self.addCleanup(market_data.plt.close, figure)
+                market_data._set_volume_ylim(axis, history)
+                market_data._draw_volume(axis, history, "5m")
+
+                self.assertAlmostEqual(axis.get_ylim()[1], max(volumes) * 1.18)
+                segments = axis.collections[0].get_segments()
+                self.assertEqual([segment[1, 1] for segment in segments],
+                                 [volume for volume in volumes if volume > 0])
+                self.assertFalse(any("clipped" in text.get_text().lower() for text in axis.texts))
 
     def test_chart_without_volume_keeps_visible_time_labels(self) -> None:
         history = _history(
