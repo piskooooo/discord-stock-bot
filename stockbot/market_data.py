@@ -20,7 +20,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 from matplotlib.patches import Rectangle
-from matplotlib.ticker import FixedLocator, FuncFormatter
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
 
 
 @dataclass(frozen=True)
@@ -47,13 +47,13 @@ REGULAR_MARKET_OPEN = time(9, 30)
 REGULAR_MARKET_CLOSE = time(16, 0)
 
 CHART_COLORS = {
-    "background": "#0d1117",
-    "axes": "#111827",
-    "grid": "#30363d",
-    "text": "#e6edf3",
-    "muted": "#9ca3af",
-    "up": "#22c55e",
-    "down": "#ef4444",
+    "background": "#1b1c27",
+    "axes": "#1b1c27",
+    "grid": "#363744",
+    "text": "#e9eaf2",
+    "muted": "#999baa",
+    "up": "#59eeb5",
+    "down": "#ff6b7a",
 }
 
 HEADERS = {
@@ -247,19 +247,29 @@ def _heikin_ashi(history: pd.DataFrame) -> pd.DataFrame:
     return ha[["Open", "High", "Low", "Close"]]
 
 
-def _candle_width(date_numbers: list[float]) -> float:
+def _candle_width(date_numbers: list[float], interval: str = "1d") -> float:
+    fallback_gap = {
+        "1m": 1 / 1440,
+        "5m": 5 / 1440,
+        "30m": 30 / 1440,
+        "1d": 1,
+        "1wk": 7,
+        "1mo": 30,
+    }.get(interval, 1)
     if len(date_numbers) < 2:
-        return 0.6
+        return min(fallback_gap * 0.68, 16)
 
     gaps = [later - earlier for earlier, later in pairwise(date_numbers) if later > earlier]
 
     if not gaps:
-        return 0.6
+        return min(fallback_gap * 0.68, 16)
 
-    return min(pd.Series(gaps).median() * 0.72, 16)
+    return min(pd.Series(gaps).median() * 0.68, 16)
 
 
-def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
+def _draw_heikin_ashi_candles(
+    ax: plt.Axes, history: pd.DataFrame, interval: str = "1d"
+) -> None:
     if history.attrs.get("flat_closed_session"):
         date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
         price = float(history["Close"].iloc[-1])
@@ -267,14 +277,14 @@ def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
             date_numbers,
             [price] * len(date_numbers),
             color=CHART_COLORS["muted"],
-            linewidth=2.2,
+            linewidth=1.2,
             alpha=0.95,
         )
         return
 
     ha = _heikin_ashi(history)
     date_numbers = mdates.date2num(ha.index.to_pydatetime()).tolist()
-    width = _candle_width(date_numbers)
+    width = _candle_width(date_numbers, interval)
     up_color = CHART_COLORS["up"]
     down_color = CHART_COLORS["down"]
 
@@ -287,10 +297,11 @@ def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
         body_low = min(open_, close)
         body_height = abs(close - open_)
 
-        ax.vlines(x_value, low, high, color=color, linewidth=1.1, alpha=0.95)
+        ax.vlines(x_value, low, high, color=color, linewidth=0.65, zorder=3)
 
         if body_height == 0:
-            ax.hlines(open_, x_value - width / 2, x_value + width / 2, color=color, linewidth=1.6)
+            ax.hlines(open_, x_value - width / 2, x_value + width / 2,
+                      color=color, linewidth=0.9, zorder=4)
         else:
             ax.add_patch(
                 Rectangle(
@@ -299,8 +310,8 @@ def _draw_heikin_ashi_candles(ax: plt.Axes, history: pd.DataFrame) -> None:
                     body_height,
                     facecolor=color,
                     edgecolor=color,
-                    linewidth=0.8,
-                    alpha=0.88,
+                    linewidth=0.4,
+                    zorder=4,
                 )
             )
 
@@ -315,19 +326,14 @@ def _format_volume(value: float, _position: int) -> str:
     return f"{value:.0f}"
 
 
-def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
-    if history.attrs.get("flat_closed_session"):
-        ax.set_ylabel("Volume")
-        ax.set_ylim(0, 1)
-        ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
-        return
-
+def _draw_volume(ax: plt.Axes, history: pd.DataFrame, interval: str = "1d") -> None:
     if "Volume" not in history or history["Volume"].sum() <= 0:
-        ax.set_visible(False)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
         return
 
     date_numbers = mdates.date2num(history.index.to_pydatetime()).tolist()
-    width = _candle_width(date_numbers)
+    width = _candle_width(date_numbers, interval)
     colors = [
         CHART_COLORS["up"] if close >= open_ else CHART_COLORS["down"]
         for open_, close in zip(history["Open"], history["Close"])
@@ -338,10 +344,11 @@ def _draw_volume(ax: plt.Axes, history: pd.DataFrame) -> None:
         history["Volume"],
         width=width,
         color=colors,
-        alpha=0.45,
+        alpha=0.9,
+        linewidth=0,
         align="center",
+        zorder=3,
     )
-    ax.set_ylabel("Volume")
     ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
 
 
@@ -416,7 +423,10 @@ def _set_price_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
     else:
         padding = price_range * 0.08
 
-    ax.set_ylim(low - padding, high + padding)
+    # Heikin-Ashi opens can extend beyond an individual raw candle's range.
+    ha = _heikin_ashi(history)
+    ax.set_ylim(min(low, float(ha["Low"].min())) - padding,
+                max(high, float(ha["High"].max())) + padding)
 
 
 def _set_volume_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
@@ -444,9 +454,33 @@ def _set_regular_session_ticks(ax: plt.Axes, history: pd.DataFrame) -> None:
 
 def _format_intraday_tick(value: float, _position: int) -> str:
     tick_time = mdates.num2date(value, tz=MARKET_TZ)
-    if tick_time.minute:
-        return tick_time.strftime("%-I:%M")
-    return tick_time.strftime("%-I")
+    return tick_time.strftime("%H:%M")
+
+
+def _format_price(value: float, _position: int = 0, precision: int = 2) -> str:
+    return f"{value:,.{precision}f}"
+
+
+def _draw_last_price(ax: plt.Axes, price: float, color: str) -> None:
+    low, high = ax.get_ylim()
+    precision = max(2, -math.floor(math.log10((high - low) / 7)))
+    if 0 < abs(price) < 1:
+        precision = max(precision, 3 - math.floor(math.log10(abs(price))))
+    ax.axhline(price, color=color, linewidth=0.75, linestyle=(0, (2, 3)),
+               alpha=0.7, zorder=2)
+    ax.text(
+        1.012, price, _format_price(price, precision=precision),
+        transform=ax.get_yaxis_transform(),
+        ha="left", va="center", color=CHART_COLORS["background"],
+        fontsize=10, fontweight="bold", clip_on=False, zorder=5,
+        bbox={"boxstyle": "round,pad=0.3,rounding_size=0.12",
+              "facecolor": color, "edgecolor": "none"},
+    )
+    # Leave a gap in the tick labels wherever the price badge sits.
+    ax.yaxis.set_major_formatter(FuncFormatter(
+        lambda value, position: "" if abs(value - price) < (high - low) * 0.05
+        else _format_price(value, position, precision)
+    ))
 
 
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
@@ -475,68 +509,79 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     fig, (ax, volume_ax) = plt.subplots(
         2,
         1,
-        figsize=(10, 6.2),
+        figsize=(11.2, 6.4),
         dpi=150,
         sharex=True,
-        gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04},
+        gridspec_kw={"height_ratios": [4, 1], "hspace": 0.045},
     )
     fig.patch.set_facecolor(CHART_COLORS["background"])
     for chart_ax in (ax, volume_ax):
         chart_ax.set_facecolor(CHART_COLORS["axes"])
 
-    _draw_heikin_ashi_candles(ax, display_history)
-    _draw_volume(volume_ax, display_history)
+    ax.text(
+        0.5, 0.5, symbol, transform=ax.transAxes, ha="center", va="center",
+        fontsize=min(110, 500 / len(symbol)), fontweight="bold",
+        color=CHART_COLORS["text"], alpha=0.035, zorder=1,
+    )
+    _draw_heikin_ashi_candles(ax, display_history, chart_range.interval)
+    volume_ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
+    _draw_volume(volume_ax, display_history, chart_range.interval)
     _set_price_ylim(ax, display_history)
     _set_volume_ylim(volume_ax, display_history)
 
     fig.suptitle(
         f"{symbol} - {chart_range.label}",
         color=CHART_COLORS["text"],
-        fontsize=15,
+        fontsize=14,
         fontweight="bold",
-        y=0.98,
+        y=0.97,
     )
     fig.text(
         0.5,
-        0.935,
+        0.925,
         summary,
         color=CHART_COLORS["muted"],
-        fontsize=10.5,
+        fontsize=10,
         ha="center",
         va="top",
     )
-    ax.set_ylabel("Price")
+    volume_ax.text(0.008, 0.92, "VOLUME", transform=volume_ax.transAxes,
+                   color=CHART_COLORS["muted"], fontsize=7, va="top")
     volume_ax.set_xlabel("")
-    ax.margins(x=0.01)
-    volume_ax.margins(x=0.01)
+    ax.margins(x=0.025)
 
     for chart_ax in (ax, volume_ax):
         chart_ax.yaxis.tick_right()
         chart_ax.yaxis.set_label_position("right")
-        chart_ax.yaxis.label.set_color(CHART_COLORS["muted"])
-        chart_ax.tick_params(axis="both", colors=CHART_COLORS["muted"])
-        chart_ax.grid(True, color=CHART_COLORS["grid"], alpha=0.55, linewidth=0.8)
+        chart_ax.tick_params(axis="both", colors=CHART_COLORS["muted"],
+                             labelsize=9, length=0, pad=9)
+        chart_ax.set_axisbelow(True)
+        chart_ax.grid(True, color=CHART_COLORS["grid"], alpha=0.65, linewidth=0.5)
 
         for spine in chart_ax.spines.values():
-            spine.set_color(CHART_COLORS["grid"])
+            spine.set_visible(False)
 
-    if chart_range.interval in {"1m", "5m", "30m"}:
-        volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d %H:%M", tz=MARKET_TZ))
-    else:
-        volume_ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=7, min_n_ticks=4))
+    price_color = CHART_COLORS[
+        "muted" if display_history.attrs.get("flat_closed_session") else arrow
+    ]
+    _draw_last_price(ax, last_price, price_color)
+
+    date_locator = mdates.AutoDateLocator(tz=MARKET_TZ, minticks=4, maxticks=8)
+    volume_ax.xaxis.set_major_locator(date_locator)
+    volume_ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(date_locator, tz=MARKET_TZ))
+    volume_ax.xaxis.get_offset_text().set_color(CHART_COLORS["muted"])
 
     if use_regular_session:
         _set_regular_session_xlim(ax, display_history)
         _set_regular_session_ticks(volume_ax, display_history)
 
-    fig.autofmt_xdate()
-    fig.subplots_adjust(left=0.07, right=0.91, bottom=0.18, top=0.88, hspace=0.04)
+    fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=0.855)
 
     image = BytesIO()
     fig.savefig(
         image,
         format="png",
-        bbox_inches="tight",
         facecolor=fig.get_facecolor(),
         edgecolor="none",
     )

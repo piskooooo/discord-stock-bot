@@ -27,7 +27,7 @@ Current commands:
 - `/info SYMBOL`: basic quote/company info.
 - `/news SYMBOL`: recent news.
 
-Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. `/mi` is special: for stocks it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart. Common Yahoo crypto pairs such as `BTC-USD` keep their continuous history instead of being forced into stock-market hours.
+Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. The chart styling uses a charcoal background, solid mint/coral candles with fine wicks, subtle gridlines and ticker watermark, brighter volume bars, and horizontal date/time labels. A dotted last-price guide and badge use the raw closing price rather than the synthetic Heikin-Ashi close; nearby price ticks are hidden to keep the badge readable. `/mi` is special: for stocks it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart. Common Yahoo crypto pairs such as `BTC-USD` keep their continuous history instead of being forced into stock-market hours.
 
 ## Repo Structure
 

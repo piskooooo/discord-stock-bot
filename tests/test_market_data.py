@@ -173,6 +173,96 @@ class MarketDataTests(TestCase):
         self.assertEqual(filename, "exm-1d-5m.png")
         self.assertEqual(summary, "Last: $103.00 | Change: +2.00 (+1.98%) | Trend: up")
 
+    def test_single_intraday_candle_fits_within_its_interval(self) -> None:
+        history = _history([("2026-08-07 14:00", 100, 106, 99, 103, 200)])
+
+        for interval, minutes in (("1m", 1), ("5m", 5), ("30m", 30)):
+            with self.subTest(interval=interval):
+                figure, axes = market_data.plt.subplots(2, 1)
+                self.addCleanup(market_data.plt.close, figure)
+
+                market_data._draw_heikin_ashi_candles(axes[0], history, interval)
+                market_data._draw_volume(axes[1], history, interval)
+
+                for axis in axes:
+                    width = axis.patches[0].get_width()
+                    self.assertGreater(width, 0)
+                    self.assertLess(width, minutes / (24 * 60))
+
+    def test_chart_without_volume_keeps_visible_time_labels(self) -> None:
+        history = _history(
+            [
+                ("2026-08-07 14:00", 100, 102, 99, 101, 0),
+                ("2026-08-07 14:05", 101, 104, 100, 103, 0),
+            ]
+        )
+
+        for include_volume in (True, False):
+            with self.subTest(include_volume=include_volume):
+                chart_history = history if include_volume else history.drop(columns="Volume")
+                figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+                self.addCleanup(market_data.plt.close, figure)
+                with (
+                    mock.patch.object(market_data, "get_history", return_value=chart_history),
+                    mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+                ):
+                    market_data.build_chart("EXM", market_data.RANGES["da"])
+
+                self.assertTrue(axes[1].get_visible())
+                self.assertTrue(axes[1].xaxis.get_visible())
+                self.assertEqual(len(axes[1].get_yticks()), 0)
+                self.assertTrue(any(
+                    label.get_visible() and label.get_text().strip()
+                    for label in axes[1].get_xticklabels()
+                ))
+
+    def test_last_price_line_uses_raw_close_instead_of_heikin_ashi_close(self) -> None:
+        history = _history(
+            [
+                ("2026-08-07 14:00", 100, 102, 99, 101, 200),
+                ("2026-08-07 14:05", 101, 104, 100, 103, 250),
+            ]
+        )
+        raw_close = float(history["Close"].iloc[-1])
+        self.assertNotEqual(raw_close, market_data._heikin_ashi(history)["Close"].iloc[-1])
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            market_data.build_chart("EXM", market_data.RANGES["da"])
+
+        self.assertTrue(any(
+            len(line.get_ydata()) >= 2 and all(value == raw_close for value in line.get_ydata())
+            for line in axes[0].lines
+        ))
+
+    def test_narrow_price_range_keeps_distinct_ticks_and_precise_last_price(self) -> None:
+        history = _history(
+            [
+                ("2026-08-07 14:00", 1.0000, 1.0003, 1.0000, 1.0002, 200),
+                ("2026-08-07 14:05", 1.0002, 1.0004, 1.0001, 1.0003, 250),
+            ]
+        )
+        raw_close = float(history["Close"].iloc[-1])
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            market_data.build_chart("EXM", market_data.RANGES["da"])
+
+        labels = [label.get_text() for label in axes[0].get_yticklabels() if label.get_text()]
+        self.assertGreater(len(labels), 1)
+        self.assertEqual(len(set(labels)), len(labels))
+        badges = [text for text in axes[0].texts if text.get_position()[1] == raw_close]
+        self.assertEqual(len(badges), 1)
+        self.assertAlmostEqual(float(badges[0].get_text().replace(",", "")), raw_close, places=7)
+
     def test_crypto_minute_chart_keeps_overnight_history(self) -> None:
         history = _history(
             [
