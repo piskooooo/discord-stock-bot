@@ -10,8 +10,8 @@ Each chart command returns a dark-mode Heikin-Ashi candle chart with volume, an 
 
 | Command | Range |
 | --- | --- |
-| `/mi` | 5-minute stock candles for the current regular session; closed stock sessions show a flat line |
-| `/da` | 1-day chart |
+| `/mi` | 5-minute stock candles for today, including extended hours; closed stock sessions show a flat line |
+| `/da` | Latest available stock-market day, including extended hours |
 | `/we` | 1-week chart |
 | `/mo` | 1-month chart |
 | `/ytd` | Year to date |
@@ -21,7 +21,7 @@ Each chart command returns a dark-mode Heikin-Ashi candle chart with volume, an 
 | `/info` | Basic company and quote information |
 | `/news` | Recent stock news |
 
-`/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
+For stocks, `/mi` and `/da` show an 8 AM–8 PM Eastern window, with shaded premarket (8–9:30 AM) and after-hours (4–8 PM) sections across price and volume. Available extended-hours candles are included; empty future hours remain blank. `/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
 
 ## Create the Discord bot
 

@@ -16,8 +16,8 @@ https://github.com/piskooooo/discord-stock-bot
 
 Current commands:
 
-- `/mi SYMBOL`: 5-minute Heikin-Ashi candles for the current regular stock-market session; closed stock sessions show a flat carry-forward line. Common crypto pairs such as `BTC-USD` keep continuous history.
-- `/da SYMBOL`: 1-day chart.
+- `/mi SYMBOL`: 5-minute Heikin-Ashi candles for today, including extended hours; closed stock sessions show a flat carry-forward line. Common crypto pairs such as `BTC-USD` keep continuous history.
+- `/da SYMBOL`: latest available stock-market day, including extended hours.
 - `/we SYMBOL`: 1-week chart.
 - `/mo SYMBOL`: 1-month chart.
 - `/ytd SYMBOL`: year-to-date chart.
@@ -27,7 +27,7 @@ Current commands:
 - `/info SYMBOL`: basic quote/company info.
 - `/news SYMBOL`: recent news.
 
-Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. The chart styling uses a charcoal background, solid mint/coral candles with fine wicks, subtle gridlines and ticker watermark, brighter volume bars, and horizontal date/time labels. A dotted last-price guide and badge use the raw closing price rather than the synthetic Heikin-Ashi close; nearby price ticks are hidden to keep the badge readable. `/mi` is special: for stocks it uses 5-minute candles, filters display data to regular market hours, shows the full 9:30 AM-4:00 PM Eastern session even if the day is not over, uses fixed readable x-axis ticks, and renders closed-market sessions as a flat carry-forward line instead of an empty chart. Common Yahoo crypto pairs such as `BTC-USD` keep their continuous history instead of being forced into stock-market hours.
+Charts are dark-mode PNGs with Heikin-Ashi candles, volume, right-side price/volume axes, Yahoo Finance data, and an in-image header showing the ticker/range, last price, change, percentage change, and trend. The chart styling uses a charcoal background, solid mint/coral candles with fine wicks, subtle gridlines and ticker watermark, brighter volume bars, and horizontal date/time labels. A dotted last-price guide and badge use the raw closing price rather than the synthetic Heikin-Ashi close; nearby price ticks are hidden to keep the badge readable. For stocks, `/mi` and `/da` show 8 AM–8 PM Eastern with shaded premarket (8–9:30 AM) and after-hours (4–8 PM) sections on both panels, plus fixed hourly ticks. Real candles from those hours are included; future hours stay blank. `/mi` selects the current Eastern date and renders days without visible session data as a flat carry-forward line. `/da` selects the latest available Eastern data date. Both the quote summary and last-price badge use the selected visible history. The shading uses fixed US regular-session boundaries, so it does not adjust for exchange holidays or early closes. Common Yahoo crypto pairs such as `BTC-USD` keep their continuous history instead of being forced into stock-market hours.
 
 ## Repo Structure
 

@@ -43,8 +43,10 @@ RANGES: dict[str, ChartRange] = {
 }
 
 MARKET_TZ = ZoneInfo("America/New_York")
+EXTENDED_MARKET_OPEN = time(8, 0)
 REGULAR_MARKET_OPEN = time(9, 30)
 REGULAR_MARKET_CLOSE = time(16, 0)
+EXTENDED_MARKET_CLOSE = time(20, 0)
 
 CHART_COLORS = {
     "background": "#1b1c27",
@@ -52,6 +54,8 @@ CHART_COLORS = {
     "grid": "#363744",
     "text": "#e9eaf2",
     "muted": "#999baa",
+    "extended_session": "#252638",
+    "session_label": "#a0a1bb",
     "up": "#59eeb5",
     "down": "#ff6b7a",
 }
@@ -352,7 +356,7 @@ def _draw_volume(ax: plt.Axes, history: pd.DataFrame, interval: str = "1d") -> N
     ax.yaxis.set_major_formatter(FuncFormatter(_format_volume))
 
 
-def _regular_session_history(
+def _single_day_history(
     history: pd.DataFrame,
     market_date: date | None = None,
 ) -> pd.DataFrame:
@@ -360,7 +364,7 @@ def _regular_session_history(
     local_datetimes = [index.astimezone(MARKET_TZ) for index in history.index]
     mask = [
         local_datetime.date() == market_date
-        and REGULAR_MARKET_OPEN <= local_datetime.time() <= REGULAR_MARKET_CLOSE
+        and EXTENDED_MARKET_OPEN <= local_datetime.time() <= EXTENDED_MARKET_CLOSE
         for local_datetime in local_datetimes
     ]
     session_history = history.loc[mask]
@@ -434,22 +438,46 @@ def _set_volume_ylim(ax: plt.Axes, history: pd.DataFrame) -> None:
         ax.set_ylim(0, float(history["Volume"].max()) * 1.18)
 
 
-def _set_regular_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
+def _set_intraday_session_xlim(ax: plt.Axes, history: pd.DataFrame) -> None:
     market_date = history.index[-1].astimezone(MARKET_TZ).date()
-    market_open = datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)
-    market_close = datetime.combine(market_date, REGULAR_MARKET_CLOSE, MARKET_TZ)
+    market_open = datetime.combine(market_date, EXTENDED_MARKET_OPEN, MARKET_TZ)
+    market_close = datetime.combine(market_date, EXTENDED_MARKET_CLOSE, MARKET_TZ)
     ax.set_xlim(mdates.date2num(market_open), mdates.date2num(market_close))
 
 
-def _set_regular_session_ticks(ax: plt.Axes, history: pd.DataFrame) -> None:
+def _set_intraday_session_ticks(ax: plt.Axes, history: pd.DataFrame) -> None:
     market_date = history.index[-1].astimezone(MARKET_TZ).date()
-    ticks = [datetime.combine(market_date, REGULAR_MARKET_OPEN, MARKET_TZ)]
-    ticks.extend(
+    ticks = [
         datetime.combine(market_date, time(hour, 0), MARKET_TZ)
-        for hour in range(10, 17)
-    )
+        for hour in range(EXTENDED_MARKET_OPEN.hour, EXTENDED_MARKET_CLOSE.hour + 1)
+    ]
     ax.xaxis.set_major_locator(FixedLocator(mdates.date2num(ticks)))
     ax.xaxis.set_major_formatter(FuncFormatter(_format_intraday_tick))
+
+
+def _shade_extended_sessions(
+    ax: plt.Axes, volume_ax: plt.Axes, history: pd.DataFrame
+) -> None:
+    market_date = history.index[-1].astimezone(MARKET_TZ).date()
+    sessions = (
+        (EXTENDED_MARKET_OPEN, REGULAR_MARKET_OPEN, "PRE-MARKET"),
+        (REGULAR_MARKET_CLOSE, EXTENDED_MARKET_CLOSE, "AFTER-HOURS"),
+    )
+    for start, end, label in sessions:
+        left, right = mdates.date2num([
+            datetime.combine(market_date, start, MARKET_TZ),
+            datetime.combine(market_date, end, MARKET_TZ),
+        ])
+        for chart_ax in (ax, volume_ax):
+            chart_ax.axvspan(
+                left, right, facecolor=CHART_COLORS["extended_session"],
+                edgecolor="none", zorder=0,
+            )
+        ax.text(
+            (left + right) / 2, 0.98, label, transform=ax.get_xaxis_transform(),
+            ha="center", va="top", fontsize=8, fontweight="bold",
+            color=CHART_COLORS["session_label"], zorder=4,
+        )
 
 
 def _format_intraday_tick(value: float, _position: int) -> str:
@@ -486,12 +514,18 @@ def _draw_last_price(ax: plt.Axes, price: float, color: str) -> None:
 def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str]:
     symbol = clean_symbol(symbol)
     history = get_history(symbol, chart_range)
-    use_regular_session = chart_range.show_full_trading_day and not _is_crypto_symbol(symbol)
-    display_history = (
-        _regular_session_history(history)
-        if use_regular_session
-        else history
+    use_stock_session = (
+        chart_range.period == "1d"
+        and chart_range.interval in {"1m", "5m", "30m"}
+        and not _is_crypto_symbol(symbol)
     )
+    display_history = history
+    if use_stock_session:
+        market_date = (
+            datetime.now(MARKET_TZ).date() if chart_range.show_full_trading_day
+            else history.index[-1].astimezone(MARKET_TZ).date()
+        )
+        display_history = _single_day_history(history, market_date)
     last_price = float(display_history["Close"].iloc[-1])
     change_history = (
         _latest_regular_session_history(history)
@@ -572,9 +606,10 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     volume_ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(date_locator, tz=MARKET_TZ))
     volume_ax.xaxis.get_offset_text().set_color(CHART_COLORS["muted"])
 
-    if use_regular_session:
-        _set_regular_session_xlim(ax, display_history)
-        _set_regular_session_ticks(volume_ax, display_history)
+    if use_stock_session:
+        _shade_extended_sessions(ax, volume_ax, display_history)
+        _set_intraday_session_xlim(ax, display_history)
+        _set_intraday_session_ticks(volume_ax, display_history)
 
     fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=0.855)
 

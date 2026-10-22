@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from unittest import TestCase, mock
 
 import pandas as pd
@@ -64,20 +64,22 @@ class MarketDataTests(TestCase):
         self.assertEqual(result["High"].tolist(), [13.0, 15.0])
         self.assertEqual(result["Low"].tolist(), [9.0, 11.0])
 
-    def test_regular_session_uses_only_requested_market_date(self) -> None:
+    def test_single_day_history_keeps_requested_date_and_extended_hours(self) -> None:
         history = _history(
             [
                 ("2026-08-06 14:00", 90, 92, 89, 91, 100),
+                ("2026-08-07 11:55", 97, 98, 96, 97, 10),
                 ("2026-08-07 12:00", 98, 99, 97, 98, 20),
                 ("2026-08-07 14:00", 100, 102, 99, 101, 200),
                 ("2026-08-07 21:00", 103, 104, 102, 103, 30),
+                ("2026-08-08 00:05", 104, 105, 103, 104, 10),
             ]
         )
 
-        result = market_data._regular_session_history(history, date(2026, 8, 7))
+        result = market_data._single_day_history(history, date(2026, 8, 7))
 
         self.assertFalse(result.attrs.get("flat_closed_session", False))
-        self.assertEqual(result["Close"].tolist(), [101])
+        self.assertEqual(result["Close"].tolist(), [98, 101, 103])
 
     def test_closed_day_creates_flat_line_for_requested_date(self) -> None:
         history = _history(
@@ -87,13 +89,110 @@ class MarketDataTests(TestCase):
             ]
         )
 
-        result = market_data._regular_session_history(history, date(2026, 8, 8))
+        result = market_data._single_day_history(history, date(2026, 8, 8))
 
         self.assertTrue(result.attrs["flat_closed_session"])
         self.assertEqual(len(result), 79)
         self.assertEqual(result.index[0].date(), date(2026, 8, 8))
         self.assertTrue((result["Close"] == 103).all())
         self.assertEqual(result["Volume"].sum(), 0)
+
+    def test_single_day_stock_charts_shade_extended_sessions_with_dst(self) -> None:
+        for earlier_day, latest_day, utc_open_hour in (
+            (date(2026, 1, 8), date(2026, 1, 9), 13),
+            (date(2026, 8, 6), date(2026, 8, 7), 12),
+        ):
+            history = _history([
+                (datetime(day.year, day.month, day.day, hour,
+                          tzinfo=market_data.MARKET_TZ).isoformat(),
+                 close - 1, close + 2, close - 2, close, 100)
+                for day in (earlier_day, latest_day)
+                for hour, close in ((8, 98), (10, 101), (17, 103))
+            ])
+            for range_key in ("mi", "da"):
+                with self.subTest(month=earlier_day.month, range=range_key):
+                    target_day = earlier_day if range_key == "mi" else latest_day
+                    today = earlier_day if range_key == "mi" else latest_day + timedelta(days=1)
+                    figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+                    self.addCleanup(market_data.plt.close, figure)
+                    with (
+                        mock.patch.object(market_data, "get_history", return_value=history),
+                        mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+                        mock.patch.object(market_data, "datetime", wraps=datetime) as frozen_datetime,
+                    ):
+                        frozen_datetime.now.return_value = datetime(
+                            today.year, today.month, today.day, 12, tzinfo=market_data.MARKET_TZ
+                        )
+                        _, _, summary = market_data.build_chart("EXM", market_data.RANGES[range_key])
+
+                    opening = datetime(target_day.year, target_day.month, target_day.day,
+                                       utc_open_hour, tzinfo=timezone.utc)
+                    expected_spans = [
+                        (opening, opening + timedelta(hours=1, minutes=30)),
+                        (opening + timedelta(hours=8), opening + timedelta(hours=12)),
+                    ]
+                    for axis in axes:
+                        spans = [patch for patch in axis.patches
+                                 if patch.get_data_transform() == axis.get_xaxis_transform()]
+                        self.assertEqual(len(spans), 2)
+                        for span, (start, end) in zip(spans, expected_spans):
+                            self.assertAlmostEqual(span.get_x(), market_data.mdates.date2num(start))
+                            self.assertAlmostEqual(span.get_x() + span.get_width(),
+                                                   market_data.mdates.date2num(end))
+                        self.assertEqual(axis.get_xlim(), (
+                            market_data.mdates.date2num(opening),
+                            market_data.mdates.date2num(opening + timedelta(hours=12)),
+                        ))
+                    self.assertNotIn("Market closed", summary)
+
+    def test_premarket_only_history_uses_real_candles(self) -> None:
+        history = _history([
+            ("2026-08-07 12:00", 98, 102, 97, 100, 20),
+            ("2026-08-07 12:05", 100, 104, 99, 103, 30),
+        ])
+
+        selected = market_data._single_day_history(history, date(2026, 8, 7))
+
+        self.assertFalse(selected.attrs.get("flat_closed_session", False))
+        pd.testing.assert_frame_equal(selected, history)
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            _, _, summary = market_data.build_chart("EXM", market_data.RANGES["da"])
+
+        candle_bodies = [patch for patch in axes[0].patches
+                         if patch.get_data_transform() == axes[0].transData]
+        self.assertEqual(len(candle_bodies), len(history))
+        self.assertNotIn("Market closed", summary)
+        self.assertIn("Last: $103.00", summary)
+
+    def test_crypto_and_multiday_charts_have_no_stock_session_shading(self) -> None:
+        history = _history([
+            ("2026-08-06 02:00", 98, 101, 97, 100, 20),
+            ("2026-08-07 14:00", 100, 104, 99, 103, 30),
+        ])
+
+        for symbol, range_key in (("BTC-USD", "mi"), ("BTC-USD", "da"),
+                                  ("EXM", "we"), ("EXM", "mo")):
+            with self.subTest(symbol=symbol, range=range_key):
+                figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+                self.addCleanup(market_data.plt.close, figure)
+                with (
+                    mock.patch.object(market_data, "get_history", return_value=history),
+                    mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+                ):
+                    market_data.build_chart(symbol, market_data.RANGES[range_key])
+
+                for axis in axes:
+                    spans = [patch for patch in axis.patches
+                             if patch.get_data_transform() == axis.get_xaxis_transform()]
+                    self.assertEqual(spans, [])
+                    left, right = axis.get_xlim()
+                    self.assertLess(left, market_data.mdates.date2num(history.index[0]))
+                    self.assertGreater(right, market_data.mdates.date2num(history.index[-1]))
 
     def test_quote_day_values_exclude_pre_and_post_market(self) -> None:
         eastern = market_data.MARKET_TZ
