@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime, timedelta, timezone
 from unittest import TestCase, mock
 
@@ -328,6 +329,63 @@ class MarketDataTests(TestCase):
         self.assertIn("21.0M", labels)
         self.assertIn("//", labels)
         self.assertTrue(any("clipped" in label.lower() for label in labels))
+
+    def test_chart_header_reports_raw_ohlc_and_total_volume_including_clipped_spike(self) -> None:
+        history = _volume_history([100_000] * 24 + [21_000_000])
+        history.iloc[10, history.columns.get_loc("High")] = 115
+        history.iloc[15, history.columns.get_loc("Low")] = 95
+        history.iloc[-1, history.columns.get_loc("Close")] = 102
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            market_data.build_chart("MRNA", market_data.RANGES["da"])
+
+        header = next(text.get_text() for text in figure.texts if "Vol:" in text.get_text())
+        values = {key: float(value.replace(",", ""))
+                  for key, value in re.findall(r"\b(O|H|L|C):\s*([\d,.]+)", header)}
+        self.assertEqual(values, {"O": 100, "H": 115, "L": 95, "C": 102})
+        self.assertNotEqual(values["C"], market_data._heikin_ashi(history)["Close"].iloc[-1])
+        self.assertIn("Vol: 23.4M", header)
+        self.assertLess(axes[1].get_ylim()[1], history["Volume"].max())
+
+    def test_chart_header_distinguishes_missing_volume_from_zero(self) -> None:
+        history = _volume_history([0, 0])
+        for chart_history, expected in (
+            (history.drop(columns="Volume"), "—"),
+            (history.assign(Volume=math.nan), "—"),
+            (history, "0"),
+        ):
+            with self.subTest(expected=expected, columns=chart_history.columns.tolist()):
+                figure = market_data.plt.figure()
+                self.addCleanup(market_data.plt.close, figure)
+                market_data._draw_chart_header(
+                    figure, "EXM", market_data.RANGES["da"], chart_history, 0, 0
+                )
+
+                header = next(text.get_text() for text in figure.texts if "Vol:" in text.get_text())
+                self.assertEqual(re.search(r"Vol:\s*(\S+)", header).group(1), expected)
+
+    def test_closed_day_header_reports_carried_price_without_invented_ohlc(self) -> None:
+        history = _volume_history([100, 200])
+        closed_history = market_data._single_day_history(history, date(2026, 8, 8))
+        figure = market_data.plt.figure()
+        self.addCleanup(market_data.plt.close, figure)
+
+        market_data._draw_chart_header(
+            figure, "EXM", market_data.RANGES["mi"], closed_history, 0, 0
+        )
+
+        texts = "\n".join(text.get_text() for text in figure.texts)
+        self.assertTrue(closed_history.attrs["flat_closed_session"])
+        self.assertEqual(float(re.search(r"Last:\s*([\d,.]+)", texts).group(1)), 103)
+        for field in ("O:", "H:", "L:", "C:", "Vol:"):
+            self.assertNotIn(field, texts)
+        self.assertIn("Market closed", texts)
+        self.assertIn("carry-forward price", texts)
 
     def test_broad_volume_surge_keeps_full_scale(self) -> None:
         for peaks in ([21_000_000, 18_000_000], [21_000_000, 21_000_000]):

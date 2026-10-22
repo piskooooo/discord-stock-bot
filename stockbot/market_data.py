@@ -321,6 +321,8 @@ def _draw_heikin_ashi_candles(
 
 
 def _format_volume(value: float, _position: int) -> str:
+    if value >= 1_000_000_000_000:
+        return f"{value / 1_000_000_000_000:.1f}T"
     if value >= 1_000_000_000:
         return f"{value / 1_000_000_000:.1f}B"
     if value >= 1_000_000:
@@ -527,11 +529,82 @@ def _format_price(value: float, _position: int = 0, precision: int = 2) -> str:
     return f"{value:,.{precision}f}"
 
 
-def _draw_last_price(ax: plt.Axes, price: float, color: str) -> None:
-    low, high = ax.get_ylim()
-    precision = max(2, -math.floor(math.log10((high - low) / 7)))
+def _price_precision(low: float, high: float, price: float) -> int:
+    precision = max(2, -math.floor(math.log10((high - low) / 7))) if high > low else 2
     if 0 < abs(price) < 1:
         precision = max(precision, 3 - math.floor(math.log10(abs(price))))
+    return precision
+
+
+def _draw_chart_header(
+    fig: plt.Figure, symbol: str, chart_range: ChartRange,
+    history: pd.DataFrame, change: float, percent: float,
+) -> float:
+    last = float(history["Close"].iloc[-1])
+    low, high = float(history["Low"].min()), float(history["High"].max())
+    precision = _price_precision(low, high, last)
+    is_closed = bool(history.attrs.get("flat_closed_session"))
+    if is_closed:
+        details = f"Last: {_format_price(last, precision=precision)}"
+    else:
+        volume = (
+            _format_volume(float(history["Volume"].sum()), 0)
+            if "Volume" in history and history["Volume"].notna().any() else "—"
+        )
+        details = (
+            f"O: {_format_price(float(history['Open'].iloc[0]), precision=precision)}  "
+            f"H: {_format_price(high, precision=precision)}  "
+            f"L: {_format_price(low, precision=precision)}  "
+            f"C: {_format_price(last, precision=precision)}  Vol: {volume}"
+        )
+    left = fig.text(
+        0.035, 0.965, f"{symbol} · {details}", ha="left", va="top",
+        color=CHART_COLORS["text"], fontsize=12, fontweight="bold",
+    )
+    right = fig.text(
+        0.965, 0.965, f"{change:+,.{precision}f} ({percent:+.2f}%)",
+        ha="right", va="top", fontsize=12, fontweight="bold",
+        color=CHART_COLORS["up" if change > 0 else "down" if change < 0 else "muted"],
+    )
+    renderer = fig.canvas.get_renderer()
+    gap = 20 * fig.dpi / 150
+    right_edge = right.get_window_extent(renderer).x0 - gap
+
+    def fit_left(edge: float) -> None:
+        while left.get_window_extent(renderer).x1 > edge and left.get_fontsize() > 9:
+            left.set_fontsize(left.get_fontsize() - 0.5)
+
+    fit_left(right_edge)
+    if left.get_window_extent(renderer).x1 > right_edge:
+        # Unusually long tickers or precise prices can use a second row.
+        left.set_text(f"{symbol}\n{details}")
+        left.set_fontsize(12)
+        fit_left(fig.bbox.width * 0.965)
+
+    header_bottom = min(left.get_window_extent(renderer).y0, right.get_window_extent(renderer).y0)
+    context_y = header_bottom / fig.bbox.height - 0.012
+    start = history.index[0].astimezone(MARKET_TZ)
+    end = history.index[-1].astimezone(MARKET_TZ)
+    dates = end.strftime("%b %d, %Y") if start.date() == end.date() else (
+        f"{start:%b %d, %Y} – {end:%b %d, %Y}"
+    )
+    context = f"{chart_range.label} · Heikin-Ashi · {dates} ET"
+    if is_closed:
+        context += " · Market closed · carry-forward price"
+    context_text = fig.text(
+        0.035, context_y, context, ha="left", va="top",
+        fontsize=8, color=CHART_COLORS["muted"],
+    )
+    fig.text(
+        0.965, context_y, "vs prior session start" if is_closed else "vs first displayed close",
+        ha="right", va="top", fontsize=8, color=CHART_COLORS["muted"],
+    )
+    return context_text.get_window_extent(renderer).y0 / fig.bbox.height - 0.025
+
+
+def _draw_last_price(ax: plt.Axes, price: float, color: str) -> None:
+    low, high = ax.get_ylim()
+    precision = _price_precision(low, high, price)
     ax.axhline(price, color=color, linewidth=0.75, linestyle=(0, (2, 3)),
                alpha=0.7, zorder=2)
     ax.text(
@@ -600,22 +673,7 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     _set_price_ylim(ax, display_history)
     _set_volume_ylim(volume_ax, display_history)
 
-    fig.suptitle(
-        f"{symbol} - {chart_range.label}",
-        color=CHART_COLORS["text"],
-        fontsize=14,
-        fontweight="bold",
-        y=0.97,
-    )
-    fig.text(
-        0.5,
-        0.925,
-        summary,
-        color=CHART_COLORS["muted"],
-        fontsize=10,
-        ha="center",
-        va="top",
-    )
+    plot_top = _draw_chart_header(fig, symbol, chart_range, display_history, change, percent)
     volume_ax.set_xlabel("")
     ax.margins(x=0.025)
 
@@ -646,7 +704,7 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
         _set_intraday_session_xlim(ax, display_history)
         _set_intraday_session_ticks(volume_ax, display_history)
 
-    fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=0.855)
+    fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=plot_top)
     volume_ax.set_xlim(ax.get_xlim())
     _draw_volume(volume_ax, display_history, chart_range.interval)
 
