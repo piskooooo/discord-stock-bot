@@ -64,20 +64,17 @@ async def send_chart(interaction: discord.Interaction, symbol: str, range_key: s
         return
 
     try:
-        image, filename, summary = await asyncio.to_thread(build_chart, symbol, chart_range)
+        image, filename, _ = await asyncio.to_thread(build_chart, symbol, chart_range)
     except Exception:
         logger.exception("Failed to build chart for %s", symbol)
         await interaction.followup.send(f"Could not get `{symbol}` data. {UPSTREAM_ERROR_MESSAGE}", ephemeral=True)
         return
 
-    file = discord.File(image, filename=filename)
-    embed = discord.Embed(
-        title=f"{symbol} - {chart_range.label}",
-        color=discord.Color.green() if "Trend: up" in summary else discord.Color.red(),
+    file = discord.File(
+        image, filename=filename,
+        description=f"{symbol} {chart_range.label} Heikin-Ashi chart. Data from Yahoo Finance.",
     )
-    embed.set_image(url=f"attachment://{filename}")
-    embed.set_footer(text="Data from Yahoo Finance.")
-    await interaction.followup.send(embed=embed, file=file)
+    await interaction.followup.send(file=file)
 
 
 @bot.tree.command(name="mi", description="Show a 5-minute stock chart.")

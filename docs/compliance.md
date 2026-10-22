@@ -25,7 +25,7 @@ This project is a private friend-group Discord bot, not a commercial financial p
 ## Yahoo Finance And Market Data
 
 - Yahoo Finance endpoints are unofficial/fragile for this use case. Avoid presenting the bot as a guaranteed real-time or licensed market data feed.
-- Keep data-source attribution visible in Discord embeds and docs.
+- Keep data-source attribution visible in chart images, info/news embeds, and docs.
 - Keep usage low-volume and personal/private. Do not monetize Yahoo-derived data or build paid features around it without reviewing and satisfying Yahoo's current terms.
 - Do not persist Yahoo response data unless a future design explicitly reviews upstream retention and licensing requirements.
 - Keep rate-limit errors friendly and avoid exposing raw upstream exceptions to Discord users.

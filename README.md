@@ -6,7 +6,7 @@ This bot is intended for private friend-group servers. It is for fun and conveni
 
 ## Commands
 
-Each chart command returns a dark-mode Heikin-Ashi candle chart with volume and Yahoo Finance attribution. The header shows the ticker, raw open/high/low/close, and total volume for the displayed range on the left, with the signed price change and percentage on the right. Smaller text identifies the range, date, and change baseline. Closed-market carry-forward charts show the carried price instead of historical OHLC. Ticker symbols can include common Yahoo formats such as `AAPL`, `BRK-B`, `^GSPC`, or `BTC-USD`.
+Each chart command uploads a dark-mode Heikin-Ashi PNG directly as an image attachment, with volume and Yahoo Finance attribution inside the image. The header shows the ticker, raw open/high/low/close, and total volume for the displayed range on the left, with the signed price change and percentage on the right. Smaller text identifies the range, date, and change baseline. Closed-market carry-forward charts show the carried price instead of historical OHLC. Ticker symbols can include common Yahoo formats such as `AAPL`, `BRK-B`, `^GSPC`, or `BTC-USD`.
 
 | Command | Range |
 | --- | --- |

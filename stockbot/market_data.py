@@ -707,6 +707,10 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
     fig.subplots_adjust(left=0.035, right=0.90, bottom=0.09, top=plot_top)
     volume_ax.set_xlim(ax.get_xlim())
     _draw_volume(volume_ax, display_history, chart_range.interval)
+    fig.text(
+        0.035, 0.02, "Data from Yahoo Finance.", ha="left", va="center",
+        fontsize=7, color=CHART_COLORS["muted"],
+    )
 
     image = BytesIO()
     fig.savefig(
