@@ -11,9 +11,9 @@ Each chart command uploads a dark-mode Heikin-Ashi PNG directly as an image atta
 | Command | Range |
 | --- | --- |
 | `/mi` | 5-minute stock candles for today, including extended hours; closed stock sessions show a flat line |
-| `/da` | Latest available stock-market day, including extended hours |
-| `/we` | 1-week chart |
-| `/mo` | 1-month chart |
+| `/da` | Daily candles for the last 5 trading days |
+| `/we` | Weekly candles over 2 years |
+| `/mo` | Monthly candles over 10 years |
 | `/ytd` | Year to date |
 | `/y1` | 1 year |
 | `/y5` | 5 years |
@@ -21,7 +21,9 @@ Each chart command uploads a dark-mode Heikin-Ashi PNG directly as an image atta
 | `/info` | Basic company and quote information |
 | `/news` | Recent stock news |
 
-For stocks, `/mi` and `/da` show an 8 AM–8 PM Eastern window, with shaded premarket (8–9:30 AM) and after-hours (4–8 PM) sections across price and volume. Available extended-hours candles are included; empty future hours remain blank. `/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
+For stocks, `/mi` shows an 8 AM–8 PM Eastern window, with shaded premarket (8–9:30 AM) and after-hours (4–8 PM) sections across price and volume. Available extended-hours candles are included; empty future hours remain blank. `/mi` keeps continuous history for common crypto pairs such as `BTC-USD`; they are not forced into stock-market hours. Invalid ticker formats receive a friendly validation message.
+
+`/da`, `/we`, and `/mo` select candle intervals rather than a one-day, one-week, or one-month window. Weekly and monthly candles are aggregated from Yahoo daily OHLCV bars; extended-hours trades are not separately added to those candles. The first and current aggregated candles may cover partial periods, and newly listed symbols may have less history.
 
 Volume uses slim, rounded bars on a linear scale. An isolated extreme spike may be clipped to keep the surrounding bars readable; a break marker, its actual volume, and a “spike clipped” note identify it.
 

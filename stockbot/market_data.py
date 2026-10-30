@@ -33,9 +33,9 @@ class ChartRange:
 
 RANGES: dict[str, ChartRange] = {
     "mi": ChartRange("5 minute", "1d", "5m", True),
-    "da": ChartRange("1 day", "1d", "5m"),
-    "we": ChartRange("1 week", "5d", "30m"),
-    "mo": ChartRange("1 month", "1mo", "1d"),
+    "da": ChartRange("Daily candles · 5 trading days", "5d", "1d"),
+    "we": ChartRange("Weekly candles · 2 years", "2y", "1wk"),
+    "mo": ChartRange("Monthly candles · 10 years", "10y", "1mo"),
     "ytd": ChartRange("YTD", "ytd", "1d"),
     "y1": ChartRange("1 year", "1y", "1d"),
     "y5": ChartRange("5 years", "5y", "1wk"),
@@ -89,12 +89,13 @@ def _is_crypto_symbol(symbol: str) -> bool:
 
 def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
     symbol = clean_symbol(symbol)
+    aggregate_daily = chart_range in (RANGES["we"], RANGES["mo"])
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
     response = requests.get(
         url,
         params={
             "range": chart_range.period,
-            "interval": chart_range.interval,
+            "interval": "1d" if aggregate_daily else chart_range.interval,
             "includePrePost": "true",
         },
         headers=HEADERS,
@@ -138,6 +139,16 @@ def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
     if history.empty:
         raise ValueError(f"No market data found for `{symbol}`.")
 
+    if aggregate_daily:
+        # Daily rows avoid Yahoo's extra current-day snapshot in coarse intervals.
+        history.index = history.index.tz_convert("UTC" if _is_crypto_symbol(symbol) else MARKET_TZ)
+        source_start, source_end = history.index.min(), history.index.max()
+        rule = "W-MON" if chart_range.interval == "1wk" else "MS"
+        history = history.sort_index().resample(rule, label="left", closed="left").agg({
+            "Open": "first", "High": "max", "Low": "min",
+            "Close": "last", "Volume": "sum",
+        }).dropna(subset=["Open", "High", "Low", "Close"])
+        history.attrs.update(source_start=source_start, source_end=source_end)
     return history
 
 
@@ -344,7 +355,7 @@ def _draw_volume(ax: plt.Axes, history: pd.DataFrame, interval: str = "1d") -> N
         # rounded strokes stay narrower than their corresponding candles.
         left = ax.transData.transform((date_numbers[0], 0))[0]
         right = ax.transData.transform((date_numbers[0] + width, 0))[0]
-        linewidth = max(0.4, (right - left) * 72 / ax.figure.dpi)
+        linewidth = min(6.0, max(0.4, (right - left) * 72 / ax.figure.dpi))
         colors = [
             CHART_COLORS["up"] if close >= open_ else CHART_COLORS["down"]
             for open_, close in zip(history["Open"], history["Close"])
@@ -583,8 +594,8 @@ def _draw_chart_header(
 
     header_bottom = min(left.get_window_extent(renderer).y0, right.get_window_extent(renderer).y0)
     context_y = header_bottom / fig.bbox.height - 0.012
-    start = history.index[0].astimezone(MARKET_TZ)
-    end = history.index[-1].astimezone(MARKET_TZ)
+    start = history.attrs.get("source_start", history.index[0]).astimezone(MARKET_TZ)
+    end = history.attrs.get("source_end", history.index[-1]).astimezone(MARKET_TZ)
     dates = end.strftime("%b %d, %Y") if start.date() == end.date() else (
         f"{start:%b %d, %Y} – {end:%b %d, %Y}"
     )

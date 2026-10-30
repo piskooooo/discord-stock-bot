@@ -83,19 +83,19 @@ async def minute(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "mi")
 
 
-@bot.tree.command(name="da", description="Show a 1-day stock chart.")
+@bot.tree.command(name="da", description="Show daily candles for the last 5 trading days.")
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def day(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "da")
 
 
-@bot.tree.command(name="we", description="Show a 1-week stock chart.")
+@bot.tree.command(name="we", description="Show weekly candles over 2 years.")
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def week(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "we")
 
 
-@bot.tree.command(name="mo", description="Show a 1-month stock chart.")
+@bot.tree.command(name="mo", description="Show monthly candles over 10 years.")
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def month(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "mo")

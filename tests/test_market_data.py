@@ -41,6 +41,67 @@ class FakeResponse:
 
 
 class MarketDataTests(TestCase):
+    def test_candle_commands_request_matching_yahoo_intervals(self) -> None:
+        expected = {"da": ("5d", "1d"), "we": ("2y", "1wk"), "mo": ("10y", "1mo")}
+        payload = {"chart": {"result": [{
+            "timestamp": [1786107600],
+            "indicators": {"quote": [{"open": [100], "high": [102],
+                "low": [99], "close": [101], "volume": [200]}]},
+        }]}}
+        for key, (period, interval) in expected.items():
+            with self.subTest(command=key), mock.patch.object(
+                market_data.requests, "get", return_value=FakeResponse(payload)
+            ) as request:
+                chart_range = market_data.RANGES[key]
+                self.assertEqual((chart_range.period, chart_range.interval), (period, interval))
+                market_data.get_history("SPY", chart_range)
+                params = request.call_args.kwargs["params"]
+                self.assertEqual((params["range"], params["interval"]), (period, "1d"))
+
+    def test_weekly_and_monthly_candles_aggregate_daily_ohlcv(self) -> None:
+        payload = {"chart": {"result": [{
+            "timestamp": [int(datetime(2026, 10, day, 13, 30, tzinfo=timezone.utc).timestamp())
+                          for day in (26, 27, 30)],
+            "indicators": {"quote": [{"open": [100, 102, 103], "high": [104, 106, 107],
+                "low": [99, 101, 98], "close": [102, 103, 105], "volume": [200, 300, 400]}]},
+        }]}}
+        for key in ("we", "mo"):
+            with self.subTest(key=key), mock.patch.object(
+                market_data.requests, "get", return_value=FakeResponse(payload)
+            ):
+                history = market_data.get_history("SPY", market_data.RANGES[key])
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history.iloc[0].tolist(), [100, 107, 98, 105, 900])
+            self.assertEqual(history.attrs["source_end"].day, 30)
+
+    def test_sparse_daily_volume_strokes_do_not_fill_the_panel(self) -> None:
+        history = _history([(f"2026-10-{day:02d} 13:30", 100, 103, 99, 102, 1000)
+                            for day in range(26, 31)])
+        figure, axis = market_data.plt.subplots()
+        self.addCleanup(market_data.plt.close, figure)
+        axis.set_xlim(market_data.mdates.date2num(history.index[0]) - 1,
+                      market_data.mdates.date2num(history.index[-1]) + 1)
+        market_data._draw_volume(axis, history, "1d")
+        self.assertLessEqual(max(axis.collections[0].get_linewidths()), 6)
+
+    def test_daily_chart_retains_all_five_daily_candles(self) -> None:
+        history = _history([
+            (f"2026-10-{day:02d} 13:30", 100 + day, 103 + day, 99 + day, 102 + day, 1000)
+            for day in range(26, 31)
+        ])
+        figure, axes = market_data.plt.subplots(2, 1, sharex=True)
+        self.addCleanup(market_data.plt.close, figure)
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data.plt, "subplots", return_value=(figure, axes)),
+        ):
+            image, filename, summary = market_data.build_chart("SPY", market_data.RANGES["da"])
+        self.assertEqual(len([c for c in axes[0].collections
+                              if all(segment[0, 0] == segment[1, 0] for segment in c.get_segments())]), 5)
+        self.assertEqual(filename, "spy-5d-1d.png")
+        self.assertIn("Last: $132.00", summary)
+        self.assertEqual(image.read(8), b"\x89PNG\r\n\x1a\n")
+
     def test_clean_symbol_accepts_common_yahoo_formats(self) -> None:
         self.assertEqual(market_data.clean_symbol(" $brk-b "), "BRK-B")
         self.assertEqual(market_data.clean_symbol("btc-usd"), "BTC-USD")
@@ -118,7 +179,7 @@ class MarketDataTests(TestCase):
                 for day in (earlier_day, latest_day)
                 for hour, close in ((8, 98), (10, 101), (17, 103))
             ])
-            for range_key in ("mi", "da"):
+            for range_key in ("mi", "latest_intraday"):
                 with self.subTest(month=earlier_day.month, range=range_key):
                     target_day = earlier_day if range_key == "mi" else latest_day
                     today = earlier_day if range_key == "mi" else latest_day + timedelta(days=1)
@@ -132,7 +193,8 @@ class MarketDataTests(TestCase):
                         frozen_datetime.now.return_value = datetime(
                             today.year, today.month, today.day, 12, tzinfo=market_data.MARKET_TZ
                         )
-                        _, _, summary = market_data.build_chart("EXM", market_data.RANGES[range_key])
+                        _, _, summary = market_data.build_chart("EXM", (market_data.ChartRange("Latest session", "1d", "5m")
+                            if range_key == "latest_intraday" else market_data.RANGES[range_key]))
 
                     opening = datetime(target_day.year, target_day.month, target_day.day,
                                        utc_open_hour, tzinfo=timezone.utc)
@@ -278,7 +340,7 @@ class MarketDataTests(TestCase):
             )
 
         self.assertEqual(image.read(8), b"\x89PNG\r\n\x1a\n")
-        self.assertEqual(filename, "exm-1d-5m.png")
+        self.assertEqual(filename, "exm-5d-1d.png")
         self.assertEqual(summary, "Last: $103.00 | Change: +2.00 (+1.98%) | Trend: up")
 
     def test_single_intraday_candle_fits_within_its_interval(self) -> None:
