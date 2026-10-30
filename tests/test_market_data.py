@@ -73,6 +73,7 @@ class MarketDataTests(TestCase):
             self.assertEqual(len(history), 1)
             self.assertEqual(history.iloc[0].tolist(), [100, 107, 98, 105, 900])
             self.assertEqual(history.attrs["source_end"].day, 30)
+            self.assertEqual(history.attrs["previous_daily_close"], 103)
 
     def test_sparse_daily_volume_strokes_do_not_fill_the_panel(self) -> None:
         history = _history([(f"2026-10-{day:02d} 13:30", 100, 103, 99, 102, 1000)
@@ -391,6 +392,76 @@ class MarketDataTests(TestCase):
         self.assertIn("21.0M", labels)
         self.assertIn("//", labels)
         self.assertTrue(any("clipped" in label.lower() for label in labels))
+
+    def test_header_shows_color_coded_raw_closes_without_range_change(self) -> None:
+        history = _history([
+            ("2026-04-30 13:30", 99, 103, 98, 100, 200),
+            ("2026-10-29 13:30", 118, 121, 117, 120, 200),
+            ("2026-10-30 13:30", 119, 120, 104, 105, 200),
+        ])
+        figure = market_data.plt.figure(figsize=(11.2, 6.4), dpi=150)
+        self.addCleanup(market_data.plt.close, figure)
+        change, percent, _ = market_data._change_text(history)
+        market_data._draw_chart_header(figure, "SPY", market_data.RANGES["da"],
+                                      history, change, percent)
+        texts = [text.get_text() for text in figure.texts]
+        self.assertFalse(any("Range:" in text or "%" in text for text in texts))
+        last = next(text for text in figure.texts if text.get_text().startswith("Last close:"))
+        first = next(text for text in figure.texts if text.get_text().startswith("First close:"))
+        self.assertEqual(last.get_text(), "Last close: 105.00")
+        self.assertEqual(first.get_text(), "First close: 100.00")
+        self.assertEqual(last.get_color(), market_data.CHART_COLORS["down"])
+        self.assertEqual(first.get_color(), market_data.CHART_COLORS["baseline"])
+        self.assertEqual(last.get_position(), (0.965, 0.965))
+        self.assertEqual(last.get_ha(), "right")
+        self.assertEqual(first.get_ha(), "right")
+        self.assertLess(first.get_position()[1], last.get_position()[1])
+
+    def test_weekly_header_uses_daily_baseline_instead_of_first_week(self) -> None:
+        history = _history([
+            ("2026-10-19 13:30", 90, 100, 89, 95, 200),
+            ("2026-10-26 13:30", 100, 110, 99, 105, 200),
+        ])
+        history.attrs["previous_daily_close"] = 110.0
+        figure = market_data.plt.figure()
+        self.addCleanup(market_data.plt.close, figure)
+        change, percent, _ = market_data._change_text(history)
+        market_data._draw_chart_header(figure, "SPY", market_data.RANGES["we"],
+                                      history, change, percent)
+        last = next(text for text in figure.texts if text.get_text().startswith("Last close:"))
+        self.assertEqual(last.get_color(), market_data.CHART_COLORS["down"])
+
+    def test_daily_price_guide_is_red_even_when_full_range_is_up(self) -> None:
+        history = _history([
+            ("2026-04-30 13:30", 100, 101, 99, 100, 200),
+            ("2026-10-29 13:30", 119, 121, 118, 120, 200),
+            ("2026-10-30 13:30", 119, 120, 104, 105, 200),
+        ])
+        with (
+            mock.patch.object(market_data, "get_history", return_value=history),
+            mock.patch.object(market_data, "_draw_last_price") as marker,
+        ):
+            market_data.build_chart("SPY", market_data.RANGES["da"])
+        self.assertEqual(marker.call_args.args[2], market_data.CHART_COLORS["down"])
+
+    def test_missing_daily_baseline_uses_neutral_price_color(self) -> None:
+        history = _history([("2026-10-30 13:30", 100, 101, 99, 100, 200)])
+        self.assertEqual(market_data._daily_price_color(history, market_data.RANGES["da"]),
+                         market_data.CHART_COLORS["muted"])
+
+    def test_last_close_colors_losses_and_flat_ranges(self) -> None:
+        for last_close, color in ((99, "down"), (100, "muted")):
+            history = _history([
+                ("2026-10-29 13:30", 100, 101, 98, 100, 200),
+                ("2026-10-30 13:30", 100, 101, 98, last_close, 200),
+            ])
+            figure = market_data.plt.figure()
+            self.addCleanup(market_data.plt.close, figure)
+            change, percent, _ = market_data._change_text(history)
+            market_data._draw_chart_header(figure, "SPY", market_data.RANGES["da"],
+                                          history, change, percent)
+            last = next(text for text in figure.texts if text.get_text().startswith("Last close:"))
+            self.assertEqual(last.get_color(), market_data.CHART_COLORS[color])
 
     def test_chart_header_reports_raw_ohlc_and_total_volume_including_clipped_spike(self) -> None:
         history = _volume_history([100_000] * 24 + [21_000_000])

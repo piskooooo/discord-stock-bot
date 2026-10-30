@@ -54,6 +54,7 @@ CHART_COLORS = {
     "grid": "#363744",
     "text": "#e9eaf2",
     "muted": "#999baa",
+    "baseline": "#86b7ff",
     "extended_session": "#252638",
     "session_label": "#a0a1bb",
     "up": "#59eeb5",
@@ -139,6 +140,22 @@ def get_history(symbol: str, chart_range: ChartRange) -> pd.DataFrame:
     if history.empty:
         raise ValueError(f"No market data found for `{symbol}`.")
 
+    source_interval = "1d" if aggregate_daily else chart_range.interval
+    previous_close = None
+    if source_interval == "1d":
+        previous_close = _previous_daily_close(history, symbol)
+    elif chart_range.period == "1d":
+        meta = result.get("meta") or {}
+        previous_close = meta.get("chartPreviousClose") or meta.get("previousClose")
+    else:
+        # Coarse Yahoo history has no previous-day bar; retrieve a daily baseline.
+        try:
+            daily = get_history(symbol, ChartRange("Daily baseline", "5d", "1d"))
+            if daily.index[-1].date() == history.index[-1].date():
+                previous_close = daily.attrs.get("previous_daily_close")
+        except (requests.RequestException, ValueError):
+            pass  # Keep the chart available with a neutral price marker.
+    history.attrs["previous_daily_close"] = previous_close
     if aggregate_daily:
         # Daily rows avoid Yahoo's extra current-day snapshot in coarse intervals.
         history.index = history.index.tz_convert("UTC" if _is_crypto_symbol(symbol) else MARKET_TZ)
@@ -547,6 +564,24 @@ def _price_precision(low: float, high: float, price: float) -> int:
     return precision
 
 
+def _previous_daily_close(history: pd.DataFrame, symbol: str) -> float | None:
+    local_index = history.index.tz_convert("UTC" if _is_crypto_symbol(symbol) else MARKET_TZ)
+    latest_date = local_index[-1].date()
+    prior = history.loc[[timestamp.date() < latest_date for timestamp in local_index], "Close"]
+    return float(prior.iloc[-1]) if not prior.empty else None
+
+
+def _daily_price_color(history: pd.DataFrame, chart_range: ChartRange) -> str:
+    previous = history.attrs.get("previous_daily_close")
+    if previous is None and chart_range.interval == "1d":
+        # Also supports callers supplying raw daily frames directly.
+        previous = _previous_daily_close(history, "")
+    if previous is None or not math.isfinite(float(previous)) or float(previous) <= 0:
+        return CHART_COLORS["muted"]
+    last = float(history["Close"].iloc[-1])
+    return CHART_COLORS["up" if last > previous else "down" if last < previous else "muted"]
+
+
 def _draw_chart_header(
     fig: plt.Figure, symbol: str, chart_range: ChartRange,
     history: pd.DataFrame, change: float, percent: float,
@@ -572,14 +607,29 @@ def _draw_chart_header(
         0.035, 0.965, f"{symbol} · {details}", ha="left", va="top",
         color=CHART_COLORS["text"], fontsize=12, fontweight="bold",
     )
-    right = fig.text(
-        0.965, 0.965, f"{change:+,.{precision}f} ({percent:+.2f}%)",
-        ha="right", va="top", fontsize=12, fontweight="bold",
-        color=CHART_COLORS["up" if change > 0 else "down" if change < 0 else "muted"],
-    )
     renderer = fig.canvas.get_renderer()
+    change_label = f"{change:+,.{precision}f} ({percent:+.2f}%)"
+    change_color = CHART_COLORS["up" if change > 0 else "down" if change < 0 else "muted"]
+    if is_closed:
+        right = fig.text(
+            0.965, 0.965, change_label, ha="right", va="top",
+            fontsize=12, fontweight="bold", color=change_color,
+        )
+        right_texts = [right]
+    else:
+        first = float(history["Close"].iloc[0])
+        right = fig.text(
+            0.965, 0.965, f"Last close: {_format_price(last, precision=precision)}",
+            ha="right", va="top", fontsize=10, color=_daily_price_color(history, chart_range),
+        )
+        first_y = right.get_window_extent(renderer).y0 / fig.bbox.height - 0.008
+        first_text = fig.text(
+            0.965, first_y, f"First close: {_format_price(first, precision=precision)}",
+            ha="right", va="top", fontsize=10, color=CHART_COLORS["baseline"],
+        )
+        right_texts = [right, first_text]
     gap = 20 * fig.dpi / 150
-    right_edge = right.get_window_extent(renderer).x0 - gap
+    right_edge = min(text.get_window_extent(renderer).x0 for text in right_texts) - gap
 
     def fit_left(edge: float) -> None:
         while left.get_window_extent(renderer).x1 > edge and left.get_fontsize() > 9:
@@ -590,9 +640,9 @@ def _draw_chart_header(
         # Unusually long tickers or precise prices can use a second row.
         left.set_text(f"{symbol}\n{details}")
         left.set_fontsize(12)
-        fit_left(fig.bbox.width * 0.965)
+        fit_left(right_edge)
 
-    header_bottom = min(left.get_window_extent(renderer).y0, right.get_window_extent(renderer).y0)
+    header_bottom = left.get_window_extent(renderer).y0
     context_y = header_bottom / fig.bbox.height - 0.012
     start = history.attrs.get("source_start", history.index[0]).astimezone(MARKET_TZ)
     end = history.attrs.get("source_end", history.index[-1]).astimezone(MARKET_TZ)
@@ -606,11 +656,15 @@ def _draw_chart_header(
         0.035, context_y, context, ha="left", va="top",
         fontsize=8, color=CHART_COLORS["muted"],
     )
-    fig.text(
-        0.965, context_y, "vs prior session start" if is_closed else "vs first displayed close",
-        ha="right", va="top", fontsize=8, color=CHART_COLORS["muted"],
-    )
-    return context_text.get_window_extent(renderer).y0 / fig.bbox.height - 0.025
+    if is_closed:
+        fig.text(
+            0.965, context_y, "vs prior session start", ha="right", va="top",
+            fontsize=8, color=CHART_COLORS["muted"],
+        )
+    bottom = min(context_text.get_window_extent(renderer).y0,
+                 min(text.get_window_extent(renderer).y0 for text in right_texts))
+    return bottom / fig.bbox.height - 0.025
+
 
 
 def _draw_last_price(ax: plt.Axes, price: float, color: str) -> None:
@@ -700,9 +754,8 @@ def build_chart(symbol: str, chart_range: ChartRange) -> tuple[BytesIO, str, str
             spine.set_visible(False)
 
     ax.yaxis.set_major_locator(MaxNLocator(nbins=7, min_n_ticks=4))
-    price_color = CHART_COLORS[
-        "muted" if display_history.attrs.get("flat_closed_session") else arrow
-    ]
+    price_color = (CHART_COLORS["muted"] if display_history.attrs.get("flat_closed_session")
+                   else _daily_price_color(display_history, chart_range))
     _draw_last_price(ax, last_price, price_color)
 
     date_locator = mdates.AutoDateLocator(tz=MARKET_TZ, minticks=4, maxticks=8)
