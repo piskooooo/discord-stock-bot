@@ -83,7 +83,7 @@ async def minute(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "mi")
 
 
-@bot.tree.command(name="da", description="Show daily candles for the last 5 trading days.")
+@bot.tree.command(name="da", description="Show daily candles over 6 months.")
 @app_commands.describe(symbol="Ticker symbol, for example AAPL, MSFT, TSLA, SPY, BTC-USD")
 async def day(interaction: discord.Interaction, symbol: str) -> None:
     await send_chart(interaction, symbol, "da")

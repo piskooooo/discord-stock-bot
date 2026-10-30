@@ -33,7 +33,7 @@ class ChartRange:
 
 RANGES: dict[str, ChartRange] = {
     "mi": ChartRange("5 minute", "1d", "5m", True),
-    "da": ChartRange("Daily candles · 5 trading days", "5d", "1d"),
+    "da": ChartRange("Daily candles · 6 months", "6mo", "1d"),
     "we": ChartRange("Weekly candles · 2 years", "2y", "1wk"),
     "mo": ChartRange("Monthly candles · 10 years", "10y", "1mo"),
     "ytd": ChartRange("YTD", "ytd", "1d"),

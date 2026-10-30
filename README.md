@@ -11,7 +11,7 @@ Each chart command uploads a dark-mode Heikin-Ashi PNG directly as an image atta
 | Command | Range |
 | --- | --- |
 | `/mi` | 5-minute stock candles for today, including extended hours; closed stock sessions show a flat line |
-| `/da` | Daily candles for the last 5 trading days |
+| `/da` | Daily candles over 6 months |
 | `/we` | Weekly candles over 2 years |
 | `/mo` | Monthly candles over 10 years |
 | `/ytd` | Year to date |

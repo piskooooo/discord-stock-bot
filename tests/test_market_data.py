@@ -42,7 +42,7 @@ class FakeResponse:
 
 class MarketDataTests(TestCase):
     def test_candle_commands_request_matching_yahoo_intervals(self) -> None:
-        expected = {"da": ("5d", "1d"), "we": ("2y", "1wk"), "mo": ("10y", "1mo")}
+        expected = {"da": ("6mo", "1d"), "we": ("2y", "1wk"), "mo": ("10y", "1mo")}
         payload = {"chart": {"result": [{
             "timestamp": [1786107600],
             "indicators": {"quote": [{"open": [100], "high": [102],
@@ -98,7 +98,7 @@ class MarketDataTests(TestCase):
             image, filename, summary = market_data.build_chart("SPY", market_data.RANGES["da"])
         self.assertEqual(len([c for c in axes[0].collections
                               if all(segment[0, 0] == segment[1, 0] for segment in c.get_segments())]), 5)
-        self.assertEqual(filename, "spy-5d-1d.png")
+        self.assertEqual(filename, "spy-6mo-1d.png")
         self.assertIn("Last: $132.00", summary)
         self.assertEqual(image.read(8), b"\x89PNG\r\n\x1a\n")
 
@@ -340,7 +340,7 @@ class MarketDataTests(TestCase):
             )
 
         self.assertEqual(image.read(8), b"\x89PNG\r\n\x1a\n")
-        self.assertEqual(filename, "exm-5d-1d.png")
+        self.assertEqual(filename, "exm-6mo-1d.png")
         self.assertEqual(summary, "Last: $103.00 | Change: +2.00 (+1.98%) | Trend: up")
 
     def test_single_intraday_candle_fits_within_its_interval(self) -> None:

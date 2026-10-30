@@ -17,7 +17,7 @@ https://github.com/piskooooo/discord-stock-bot
 Current commands:
 
 - `/mi SYMBOL`: 5-minute Heikin-Ashi candles for today, including extended hours; closed stock sessions show a flat carry-forward line. Common crypto pairs such as `BTC-USD` keep continuous history.
-- `/da SYMBOL`: daily candles for the last 5 trading days.
+- `/da SYMBOL`: daily candles over 6 months.
 - `/we SYMBOL`: weekly candles over 2 years.
 - `/mo SYMBOL`: monthly candles over 10 years.
 - `/ytd SYMBOL`: year-to-date chart.
