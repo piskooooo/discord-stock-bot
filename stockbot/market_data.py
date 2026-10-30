@@ -571,15 +571,25 @@ def _previous_daily_close(history: pd.DataFrame, symbol: str) -> float | None:
     return float(prior.iloc[-1]) if not prior.empty else None
 
 
-def _daily_price_color(history: pd.DataFrame, chart_range: ChartRange) -> str:
+def _daily_change(
+    history: pd.DataFrame, chart_range: ChartRange,
+) -> tuple[float, float] | None:
     previous = history.attrs.get("previous_daily_close")
     if previous is None and chart_range.interval == "1d":
         # Also supports callers supplying raw daily frames directly.
         previous = _previous_daily_close(history, "")
     if previous is None or not math.isfinite(float(previous)) or float(previous) <= 0:
+        return None
+    change = float(history["Close"].iloc[-1]) - float(previous)
+    return change, change / float(previous) * 100
+
+
+def _daily_price_color(history: pd.DataFrame, chart_range: ChartRange) -> str:
+    daily = _daily_change(history, chart_range)
+    if daily is None:
         return CHART_COLORS["muted"]
-    last = float(history["Close"].iloc[-1])
-    return CHART_COLORS["up" if last > previous else "down" if last < previous else "muted"]
+    change, _ = daily
+    return CHART_COLORS["up" if change > 0 else "down" if change < 0 else "muted"]
 
 
 def _draw_chart_header(
@@ -618,8 +628,20 @@ def _draw_chart_header(
         right_texts = [right]
     else:
         first = float(history["Close"].iloc[0])
+        daily = _daily_change(history, chart_range)
+        if daily is None:
+            daily_label = "Day: unavailable"
+        else:
+            daily_amount, daily_percent = daily
+            sign = "-" if daily_amount < 0 else "+"
+            daily_label = f"Day: {sign}${abs(daily_amount):,.{precision}f} ({daily_percent:+.2f}%)"
+        daily_text = fig.text(
+            0.965, 0.965, daily_label, ha="right", va="top", fontsize=11,
+            fontweight="bold", color=_daily_price_color(history, chart_range),
+        )
+        last_y = daily_text.get_window_extent(renderer).y0 / fig.bbox.height - 0.008
         right = fig.text(
-            0.965, 0.965, f"Last close: {_format_price(last, precision=precision)}",
+            0.965, last_y, f"Last close: {_format_price(last, precision=precision)}",
             ha="right", va="top", fontsize=10, color=_daily_price_color(history, chart_range),
         )
         first_y = right.get_window_extent(renderer).y0 / fig.bbox.height - 0.008
@@ -627,7 +649,7 @@ def _draw_chart_header(
             0.965, first_y, f"First close: {_format_price(first, precision=precision)}",
             ha="right", va="top", fontsize=10, color=CHART_COLORS["baseline"],
         )
-        right_texts = [right, first_text]
+        right_texts = [daily_text, right, first_text]
     gap = 20 * fig.dpi / 150
     right_edge = min(text.get_window_extent(renderer).x0 for text in right_texts) - gap
 

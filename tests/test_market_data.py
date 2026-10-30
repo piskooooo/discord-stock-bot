@@ -405,14 +405,17 @@ class MarketDataTests(TestCase):
         market_data._draw_chart_header(figure, "SPY", market_data.RANGES["da"],
                                       history, change, percent)
         texts = [text.get_text() for text in figure.texts]
-        self.assertFalse(any("Range:" in text or "%" in text for text in texts))
+        self.assertFalse(any("Range:" in text for text in texts))
+        self.assertIn("Day: -$15.00 (-12.50%)", texts)
         last = next(text for text in figure.texts if text.get_text().startswith("Last close:"))
         first = next(text for text in figure.texts if text.get_text().startswith("First close:"))
         self.assertEqual(last.get_text(), "Last close: 105.00")
         self.assertEqual(first.get_text(), "First close: 100.00")
         self.assertEqual(last.get_color(), market_data.CHART_COLORS["down"])
         self.assertEqual(first.get_color(), market_data.CHART_COLORS["baseline"])
-        self.assertEqual(last.get_position(), (0.965, 0.965))
+        daily = next(text for text in figure.texts if text.get_text().startswith("Day:"))
+        self.assertEqual(daily.get_position(), (0.965, 0.965))
+        self.assertLess(last.get_position()[1], daily.get_position()[1])
         self.assertEqual(last.get_ha(), "right")
         self.assertEqual(first.get_ha(), "right")
         self.assertLess(first.get_position()[1], last.get_position()[1])
@@ -448,6 +451,20 @@ class MarketDataTests(TestCase):
         history = _history([("2026-10-30 13:30", 100, 101, 99, 100, 200)])
         self.assertEqual(market_data._daily_price_color(history, market_data.RANGES["da"]),
                          market_data.CHART_COLORS["muted"])
+
+    def test_daily_change_readout_handles_gain_flat_and_missing_baseline(self) -> None:
+        for previous, expected in ((100, "Day: +$5.00 (+5.00%)"),
+                                   (105, "Day: +$0.00 (+0.00%)"),
+                                   (None, "Day: unavailable"),
+                                   (0, "Day: unavailable")):
+            with self.subTest(previous=previous):
+                history = _history([("2026-10-30 13:30", 100, 106, 99, 105, 200)])
+                history.attrs["previous_daily_close"] = previous
+                figure = market_data.plt.figure()
+                self.addCleanup(market_data.plt.close, figure)
+                market_data._draw_chart_header(figure, "SPY", market_data.RANGES["we"],
+                                              history, 99, 99)
+                self.assertIn(expected, [text.get_text() for text in figure.texts])
 
     def test_last_close_colors_losses_and_flat_ranges(self) -> None:
         for last_close, color in ((99, "down"), (100, "muted")):
